@@ -8,6 +8,8 @@ export default defineConfig({
     browser: 'src/browser/index.ts',
     indexeddb: 'src/indexeddb/index.ts',
     sqlite: 'src/sqlite/index.ts',
+    file: 'src/file/index.ts',
+    'file-node': 'src/file/node.ts',
   },
   format: ['esm', 'cjs'],
   dts: {
@@ -20,4 +22,7 @@ export default defineConfig({
   treeshake: true,
   target: 'es2022',
   platform: 'neutral',
+  // Keep `node:` on built-in imports: Deno rejects the bare names.
+  removeNodeProtocol: false,
+  external: [/^node:/],
 });

@@ -9,7 +9,8 @@
 - **0.3.0**: the `/browser` entry point with `localStorageAdapter()`.
 - **0.4.0**: the `/indexeddb` entry point with `indexedDbAdapter()` and the
   `/sqlite` entry point with `sqliteAdapter()`.
-- **0.5.0**: `sessionStorageAdapter()` in `/browser`.
+- **0.5.0**: `sessionStorageAdapter()` in `/browser` and the `/file` entry point
+  with `fileAdapter()` (and `nodeFileSystem()` in `/file/node`).
 
 ## Ground rules for every new adapter
 
@@ -30,17 +31,12 @@
 
 ## Next
 
-1. **Flat file adapter** (`/file`). One file per key inside a directory, with
-   keys encoded into safe file names. Writes go to a temp file and are renamed
-   into place. A per-key lock makes the revision check safe within one process.
-   Revision is stored beside the value. Takes a `FileSystemLike` interface, so
-   Node, Bun and Deno can each supply their own.
-2. **JSON file adapter** (`/json-file`). One JSON document holding every key:
+1. **JSON file adapter** (`/json-file`). One JSON document holding every key:
    `{ "<key>": { "r": "...", "v": "..." } }`. Atomic write by temp file and
    rename. Loads once and caches, with an optional watch for outside edits.
    Best for small config and settings data; the docs will say where to prefer
    the flat file or SQLite adapters.
-3. **YAML and INI file adapters** (`/yaml-file`, `/ini-file`). The same
+2. **YAML and INI file adapters** (`/yaml-file`, `/ini-file`). The same
    single-document design as the JSON file adapter, for settings people edit by
    hand. The document code is shared and takes a small `{ parse, stringify }`
    codec, so the `yaml` and `ini` packages plug in and no parser is bundled.
@@ -50,7 +46,7 @@
    so a value it cannot hold on one line is refused with `invalid` rather than
    mangled. The JSON file adapter is built first, with the codec seam, so these
    two are thin wrappers.
-4. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
+3. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
    adapters over a minimal `query(sql, params)` interface, so `mysql2`, `pg`,
    `postgres` and similar clients all fit. Same `storage_entry` table as
    SQLite, using native `UUID` on Postgres and `CHAR(36)` on MySQL, with
@@ -62,7 +58,7 @@
 
 ## Eventually
 
-Cloud and server backends. They follow the six above and reuse the shared
+Cloud and server backends. They follow the adapters above and reuse the shared
 conformance suite.
 
 - **Redis adapter** (`/redis`). One Redis hash per key holding `r` (revision)
