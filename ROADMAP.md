@@ -9,6 +9,7 @@
 - **0.3.0**: the `/browser` entry point with `localStorageAdapter()`.
 - **0.4.0**: the `/indexeddb` entry point with `indexedDbAdapter()` and the
   `/sqlite` entry point with `sqliteAdapter()`.
+- **0.5.0**: `sessionStorageAdapter()` in `/browser`.
 
 ## Ground rules for every new adapter
 
@@ -29,21 +30,17 @@
 
 ## Next
 
-1. **sessionStorage adapter**. Add `sessionStorageAdapter()` to `/browser`,
-   sharing the code and tests of `localStorageAdapter()`. Same envelope, so no
-   new subpath is needed. `subscribe` is a no-op because `storage` events do
-   not fire across tabs for session data.
-2. **Flat file adapter** (`/file`). One file per key inside a directory, with
+1. **Flat file adapter** (`/file`). One file per key inside a directory, with
    keys encoded into safe file names. Writes go to a temp file and are renamed
    into place. A per-key lock makes the revision check safe within one process.
    Revision is stored beside the value. Takes a `FileSystemLike` interface, so
    Node, Bun and Deno can each supply their own.
-3. **JSON file adapter** (`/json-file`). One JSON document holding every key:
+2. **JSON file adapter** (`/json-file`). One JSON document holding every key:
    `{ "<key>": { "r": "...", "v": "..." } }`. Atomic write by temp file and
    rename. Loads once and caches, with an optional watch for outside edits.
    Best for small config and settings data; the docs will say where to prefer
    the flat file or SQLite adapters.
-4. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
+3. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
    adapters over a minimal `query(sql, params)` interface, so `mysql2`, `pg`,
    `postgres` and similar clients all fit. Same `storage_entry` table as
    SQLite, using native `UUID` on Postgres and `CHAR(36)` on MySQL, with
