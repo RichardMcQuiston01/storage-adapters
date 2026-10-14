@@ -98,6 +98,11 @@ export default tseslint.config(
     },
   },
   {
+    // The one file in src/ that may import a file system module.
+    files: ['src/file/node.ts'],
+    rules: { 'no-restricted-imports': 'off' },
+  },
+  {
     files: ['test/**/*.ts', '*.config.{js,ts}'],
     languageOptions: { globals: { ...globals.node } },
   }
