@@ -32,6 +32,8 @@
 - Tests use `node:test` and run offline against fakes or local files.
 - Each adapter ships with a changeset (minor), README usage and a matching
   entry here.
+- Each adapter is added to `test/conformance.test.ts`, which runs the shared
+  contract suite (`test/support/conformance.ts`) against it.
 
 ## Next
 
@@ -81,8 +83,6 @@ conformance suite.
 - REST adapter for a remote key-value API.
 - Optional `list(prefix, options)` on `StorageAdapter`, to list or clear keys.
   Useful once the file and database adapters exist.
-- Shared conformance test suite that every adapter runs, to keep behaviour
-  identical across backends.
 - Switch `dashboard-widgets-toolkit` to depend on this package; it keeps
   re-exporting the wrappers so its public API and tests are unchanged.
 - Optional React hook (`useStoredValue`).
