@@ -1,6 +1,6 @@
 {
   "name": "@richardmcquiston01/storage-adapters",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value contract with typed errors and revisions, composable wrappers (prefix, fallback, retry, cache, encoding), and a generic persistence helper with conflict handling. No I/O in the core.",
   "keywords": [
     "typescript",
@@ -50,12 +50,38 @@
         "default": "./dist/browser.cjs"
       }
     },
+    "./indexeddb": {
+      "import": {
+        "types": "./dist/indexeddb.d.ts",
+        "default": "./dist/indexeddb.js"
+      },
+      "require": {
+        "types": "./dist/indexeddb.d.cts",
+        "default": "./dist/indexeddb.cjs"
+      }
+    },
+    "./sqlite": {
+      "import": {
+        "types": "./dist/sqlite.d.ts",
+        "default": "./dist/sqlite.js"
+      },
+      "require": {
+        "types": "./dist/sqlite.d.cts",
+        "default": "./dist/sqlite.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
       "browser": [
         "./dist/browser.d.ts"
+      ],
+      "indexeddb": [
+        "./dist/indexeddb.d.ts"
+      ],
+      "sqlite": [
+        "./dist/sqlite.d.ts"
       ]
     }
   },
@@ -84,6 +110,7 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.20.5",
     "eslint": "^10.12.0",
+    "fake-indexeddb": "^6.2.5",
     "globals": "^17.13.0",
     "prettier": "^3.9.9",
     "tsup": "^8.5.1",
