@@ -29,14 +29,39 @@ bun add @richardmcquiston01/storage-adapters
 
 ### Usage
 
-> **Status:** package skeleton. The adapter contract, wrappers and
-> persistence helper are moved over from
-> [`dashboard-widgets-toolkit`](https://github.com/RichardMcQuiston01/dashboard-widgets-toolkit)
-> in the next release. See [ROADMAP.md](./ROADMAP.md).
+An adapter is an async key-value store with typed errors and optional
+revisions for conflict detection. Results are values you check, never
+thrown errors.
+
+```ts
+import {
+  memoryAdapter,
+  withFallback,
+  withPrefix,
+  type StorageAdapter,
+} from '@richardmcquiston01/storage-adapters';
+
+const adapter: StorageAdapter = withPrefix(
+  withFallback(myBrowserAdapter, memoryAdapter()),
+  'my-app:'
+);
+
+const signal: AbortSignal = new AbortController().signal;
+const saved = await adapter.set('theme', 'dark', { signal });
+if (!saved.ok) {
+  console.error(saved.code, saved.error); // names the key and the cause
+}
+```
+
+Wrappers: `withPrefix`, `withFallback`, `withReadCache`, `readOnly`,
+`withRetry` (you pass `sleep`, so there are no timers), `withEncoding`
+(compression or encryption, with your own functions) and `withLogging`
+(keys and outcomes, never values). Implement `get`, `set` and optionally
+`remove` and `subscribe` for localStorage, IndexedDB, REST or a database.
 
 ### Examples
 
-Coming with the first feature release.
+See `test/adapters.test.ts` for each wrapper in use.
 
 [Back to Top](#table-of-contents)
 
