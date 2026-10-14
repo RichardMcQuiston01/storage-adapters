@@ -18,3 +18,13 @@ export type {
   StoreResult,
   StoredValue,
 } from './storage.js';
+export { DEFAULT_MAX_BYTES, createPersistence } from './persistence.js';
+export type {
+  ConflictPolicy,
+  Loaded,
+  LoadOptions,
+  Persistence,
+  PersistenceOptions,
+  Saved,
+  SaveOptions,
+} from './persistence.js';

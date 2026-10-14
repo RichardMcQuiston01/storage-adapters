@@ -63,7 +63,7 @@ export interface StorageAdapter {
   ): () => void;
 }
 
-function failure(
+export function failure(
   code: StoreErrorCode,
   error: string
 ): {
