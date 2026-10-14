@@ -59,6 +59,24 @@ Wrappers: `withPrefix`, `withFallback`, `withReadCache`, `readOnly`,
 (keys and outcomes, never values). Implement `get`, `set` and optionally
 `remove` and `subscribe` for localStorage, IndexedDB, REST or a database.
 
+#### Browser storage
+
+The core does no I/O. `localStorageAdapter` lives in the optional `/browser`
+entry point, so importing the main entry never touches a browser global.
+
+```ts
+import { withFallback, memoryAdapter } from '@richardmcquiston01/storage-adapters';
+import { localStorageAdapter } from '@richardmcquiston01/storage-adapters/browser';
+
+const adapter: StorageAdapter = withFallback(localStorageAdapter(), memoryAdapter());
+```
+
+Each value is stored with a counter revision, so `set` with `ifRevision`
+returns `conflict` when another tab wrote first, and `subscribe` reports
+changes made in other tabs. A full store is `quota`, blocked storage is
+`forbidden`, and nothing throws. Pass `storage` or `events` to use something
+other than the global `localStorage` and `window`.
+
 #### Typed persistence
 
 `createPersistence<T>` stores one kind of value with a versioned envelope, a
@@ -103,7 +121,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use.
+See `test/adapters.test.ts` for each wrapper in use, and `test/browser.test.ts` for the browser adapter.
 
 [Back to Top](#table-of-contents)
 
