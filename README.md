@@ -59,6 +59,25 @@ Wrappers: `withPrefix`, `withFallback`, `withReadCache`, `readOnly`,
 (keys and outcomes, never values). Implement `get`, `set` and optionally
 `remove` and `subscribe` for localStorage, IndexedDB, REST or a database.
 
+#### Browser storage
+
+The root entry does no I/O. For `localStorage`, import the optional
+`/browser` entry:
+
+```ts
+import { withPrefix } from '@richardmcquiston01/storage-adapters';
+import { localStorageAdapter } from '@richardmcquiston01/storage-adapters/browser';
+
+const adapter = withPrefix(localStorageAdapter(), 'my-app:');
+```
+
+Each value is stored as `{ "r": revision, "v": value }` with a counter
+revision, so `set` with `ifRevision` reports `conflict` when another tab wrote
+first, and `subscribe` reports changes made in other tabs through `storage`
+events. Quota errors map to `quota`, blocked storage to `forbidden` or
+`unavailable`, and nothing throws. Pass `storage` or `events` to use another
+Web Storage object or event target (tests, iframes).
+
 #### Typed persistence
 
 `createPersistence<T>` stores one kind of value with a versioned envelope, a

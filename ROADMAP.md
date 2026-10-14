@@ -14,6 +14,7 @@
 
 ## Later
 
-- Optional adapter subpaths (browser storage, IndexedDB, REST); the core
-  stays I/O-free.
+- More optional adapter subpaths (IndexedDB, REST); the core stays I/O-free.
+  Browser storage (`/browser`, `localStorageAdapter`) is built and ships with
+  the next release.
 - Optional React hook (`useStoredValue`).
