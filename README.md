@@ -59,6 +59,48 @@ Wrappers: `withPrefix`, `withFallback`, `withReadCache`, `readOnly`,
 (keys and outcomes, never values). Implement `get`, `set` and optionally
 `remove` and `subscribe` for localStorage, IndexedDB, REST or a database.
 
+#### Typed persistence
+
+`createPersistence<T>` stores one kind of value with a versioned envelope, a
+size limit, revision tracking and a conflict policy. Rapid saves to a key
+collapse into the newest, and every caller gets a result.
+
+```ts
+import {
+  createPersistence,
+  type Persistence,
+} from '@richardmcquiston01/storage-adapters';
+
+interface Preferences {
+  readonly theme: string;
+}
+
+const preferences: Persistence<Preferences> = createPersistence(adapter, {
+  // Repairs what it can; throw for a payload that can't be read.
+  parse: (raw: unknown): Preferences => ({
+    theme:
+      typeof raw === 'object' &&
+      raw !== null &&
+      typeof (raw as { theme?: unknown }).theme === 'string'
+        ? (raw as { theme: string }).theme
+        : 'light',
+  }),
+  label: 'preferences', // used in error messages
+  onConflict: (mine, theirs) => ({ ...theirs, theme: mine.theme }),
+});
+
+const saved = await preferences.save('user-42:prefs', { theme: 'dark' });
+if (saved.ok && saved.value.outcome === 'conflict') {
+  // Someone else saved first; saved.value.value is what is stored.
+}
+```
+
+Conflict policies: `'ask'` (default; returns `outcome: 'conflict'`, then
+save again with `force: true`), `'overwrite'`, `'keep-theirs'`, or a merge
+function. `watch(key, onChange)` reports changes from elsewhere when the
+adapter has `subscribe`. Pass `field` and `version` to match an existing
+envelope.
+
 ### Examples
 
 See `test/adapters.test.ts` for each wrapper in use.
