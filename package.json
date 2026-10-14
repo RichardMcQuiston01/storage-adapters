@@ -60,6 +60,16 @@
         "default": "./dist/indexeddb.cjs"
       }
     },
+    "./sqlite": {
+      "import": {
+        "types": "./dist/sqlite.d.ts",
+        "default": "./dist/sqlite.js"
+      },
+      "require": {
+        "types": "./dist/sqlite.d.cts",
+        "default": "./dist/sqlite.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -69,6 +79,9 @@
       ],
       "indexeddb": [
         "./dist/indexeddb.d.ts"
+      ],
+      "sqlite": [
+        "./dist/sqlite.d.ts"
       ]
     }
   },

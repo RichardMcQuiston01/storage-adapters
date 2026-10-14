@@ -7,7 +7,8 @@
 - **0.2.0**: `createPersistence<T>`: typed persistence with a versioned
   envelope, conflict policies, serialized saves and `watch`.
 - **0.3.0**: the `/browser` entry point with `localStorageAdapter()`.
-- **0.4.0**: the `/indexeddb` entry point with `indexedDbAdapter()`.
+- **0.4.0**: the `/indexeddb` entry point with `indexedDbAdapter()` and the
+  `/sqlite` entry point with `sqliteAdapter()`.
 
 ## Ground rules for every new adapter
 
@@ -28,28 +29,21 @@
 
 ## Next
 
-1. **SQLite adapter** (`/sqlite`). Works with `bun:sqlite` and `node:sqlite`
-   behind a small `SqliteLike` interface, so other drivers can plug in.
-   Compare-and-set is one `UPDATE ... WHERE revision = ?`. Table `storage_entry`
-   with snake_case columns: `storage_entry_id` (UUID text), `entry_key`
-   (unique), `entry_value`, `revision`, `created_at`, `updated_at`. The schema
-   is created on first use. `subscribe` covers changes made through the same
-   adapter only.
-2. **sessionStorage adapter**. Add `sessionStorageAdapter()` to `/browser`,
+1. **sessionStorage adapter**. Add `sessionStorageAdapter()` to `/browser`,
    sharing the code and tests of `localStorageAdapter()`. Same envelope, so no
    new subpath is needed. `subscribe` is a no-op because `storage` events do
    not fire across tabs for session data.
-3. **Flat file adapter** (`/file`). One file per key inside a directory, with
+2. **Flat file adapter** (`/file`). One file per key inside a directory, with
    keys encoded into safe file names. Writes go to a temp file and are renamed
    into place. A per-key lock makes the revision check safe within one process.
    Revision is stored beside the value. Takes a `FileSystemLike` interface, so
    Node, Bun and Deno can each supply their own.
-4. **JSON file adapter** (`/json-file`). One JSON document holding every key:
+3. **JSON file adapter** (`/json-file`). One JSON document holding every key:
    `{ "<key>": { "r": "...", "v": "..." } }`. Atomic write by temp file and
    rename. Loads once and caches, with an optional watch for outside edits.
    Best for small config and settings data; the docs will say where to prefer
    the flat file or SQLite adapters.
-5. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
+4. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
    adapters over a minimal `query(sql, params)` interface, so `mysql2`, `pg`,
    `postgres` and similar clients all fit. Same `storage_entry` table as
    SQLite, using native `UUID` on Postgres and `CHAR(36)` on MySQL, with

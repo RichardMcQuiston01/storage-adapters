@@ -7,6 +7,7 @@ export default defineConfig({
     index: 'src/index.ts',
     browser: 'src/browser/index.ts',
     indexeddb: 'src/indexeddb/index.ts',
+    sqlite: 'src/sqlite/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: {
