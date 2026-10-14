@@ -11,6 +11,8 @@ export default defineConfig({
     file: 'src/file/index.ts',
     'file-node': 'src/file/node.ts',
     'json-file': 'src/json-file/index.ts',
+    'yaml-file': 'src/yaml-file/index.ts',
+    'ini-file': 'src/ini-file/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: {

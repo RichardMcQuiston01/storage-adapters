@@ -9,7 +9,7 @@ import {
   documentFileAdapter,
   type DocumentCodec,
   type EntryLayout,
-} from './document-file.js';
+} from '../document-file/document-file.js';
 
 export interface JsonFileAdapterOptions {
   /** The file to keep everything in. Its folder is created on first write. */

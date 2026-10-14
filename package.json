@@ -100,6 +100,26 @@
         "default": "./dist/json-file.cjs"
       }
     },
+    "./yaml-file": {
+      "import": {
+        "types": "./dist/yaml-file.d.ts",
+        "default": "./dist/yaml-file.js"
+      },
+      "require": {
+        "types": "./dist/yaml-file.d.cts",
+        "default": "./dist/yaml-file.cjs"
+      }
+    },
+    "./ini-file": {
+      "import": {
+        "types": "./dist/ini-file.d.ts",
+        "default": "./dist/ini-file.js"
+      },
+      "require": {
+        "types": "./dist/ini-file.d.cts",
+        "default": "./dist/ini-file.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -121,6 +141,12 @@
       ],
       "json-file": [
         "./dist/json-file.d.ts"
+      ],
+      "yaml-file": [
+        "./dist/yaml-file.d.ts"
+      ],
+      "ini-file": [
+        "./dist/ini-file.d.ts"
       ]
     }
   },
@@ -151,9 +177,11 @@
     "eslint": "^10.12.0",
     "fake-indexeddb": "^6.2.5",
     "globals": "^17.13.0",
+    "ini": "^7.0.0",
     "prettier": "^3.9.9",
     "tsup": "^8.5.1",
     "typescript": "~6.0.2",
-    "typescript-eslint": "^8.71.1"
+    "typescript-eslint": "^8.71.1",
+    "yaml": "^2.9.1"
   }
 }

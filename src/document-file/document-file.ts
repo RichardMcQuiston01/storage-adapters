@@ -27,6 +27,12 @@ export interface DocumentCodec {
 
 /** How one key's entry is written inside the document. */
 export interface EntryLayout {
+  /**
+   * Optional. Says why this key and value cannot be stored in this format, or
+   * `undefined` if they can. Called before anything is written, so a value the
+   * format would change is refused instead of stored wrongly.
+   */
+  check?(key: string, value: string): string | undefined;
   /** Reads an entry. `undefined` means what is there is not a valid entry. */
   read(raw: unknown): StoredValue | undefined;
   /** Makes the entry for a new value, given what is stored now (`null` for nothing). */
@@ -187,7 +193,7 @@ export function documentFileAdapter(
       }
       const read: DocumentRead = await readDocument();
       if (read.kind === 'ok') {
-        snapshot = read.entries;
+        adopt(read.entries);
       }
       return read;
     });
@@ -205,6 +211,26 @@ export function documentFileAdapter(
         listener(stored);
       } catch {
         // A faulty listener must not turn a successful write into a failure.
+      }
+    }
+  };
+
+  /**
+   * Takes entries just read from the file as the current picture of it, and tells
+   * subscribers about any key that is different from the picture before. A copy is
+   * kept, so a write that later fails cannot leak into what is remembered.
+   */
+  const adopt = (entries: Map<string, unknown>): void => {
+    const before: Map<string, unknown> | null = snapshot;
+    snapshot = new Map(entries);
+    if (before === null) {
+      return;
+    }
+    for (const key of listeners.keys()) {
+      const previous = storedOf(before, key);
+      const current = storedOf(entries, key);
+      if (current !== undefined && !sameStored(previous ?? null, current)) {
+        notify(key, current);
       }
     }
   };
@@ -229,18 +255,7 @@ export function documentFileAdapter(
       if (read.kind !== 'ok') {
         return; // Probably half-saved by an editor; wait for the next change.
       }
-      const before: Map<string, unknown> | null = snapshot;
-      snapshot = read.entries;
-      if (before === null) {
-        return;
-      }
-      for (const key of listeners.keys()) {
-        const previous = storedOf(before, key);
-        const current = storedOf(read.entries, key);
-        if (current !== undefined && !sameStored(previous ?? null, current)) {
-          notify(key, current);
-        }
-      }
+      adopt(read.entries);
     });
   };
 
@@ -294,7 +309,7 @@ export function documentFileAdapter(
           return corruptDocument(key, read.detail);
         }
         if (!options.cache) {
-          snapshot = read.entries;
+          adopt(read.entries);
         }
         const stored = storedOf(read.entries, key);
         if (stored === undefined) {
@@ -311,6 +326,10 @@ export function documentFileAdapter(
       if (abortedResult !== null) {
         return abortedResult;
       }
+      const problem: string | undefined = layout.check?.(key, value);
+      if (problem !== undefined) {
+        return failure('invalid', key, problem);
+      }
       const result: StoreResult<StoredValue> = await withLock(
         lockName,
         async (): Promise<StoreResult<StoredValue>> => {
@@ -321,6 +340,8 @@ export function documentFileAdapter(
             if (read.kind === 'corrupt') {
               return corruptDocument(key, read.detail);
             }
+            // What was just read is the truth, even if the write below is refused.
+            adopt(read.entries);
             // An invalid entry is replaced, so it counts as nothing stored.
             const existing: StoredValue | null =
               storedOf(read.entries, key) ?? null;
@@ -338,7 +359,7 @@ export function documentFileAdapter(
             const written = layout.write(value, existing);
             read.entries.set(key, written.raw);
             await writeDocument(read.entries);
-            snapshot = read.entries;
+            snapshot = new Map(read.entries);
             return { ok: true, value: written.stored };
           } catch (error: unknown) {
             return failedWithFor(label, error, key, 'written');
@@ -364,10 +385,11 @@ export function documentFileAdapter(
             if (read.kind === 'corrupt') {
               return corruptDocument(key, read.detail);
             }
+            adopt(read.entries);
             if (read.entries.delete(key)) {
               await writeDocument(read.entries);
             }
-            snapshot = read.entries;
+            snapshot = new Map(read.entries);
             return { ok: true, value: null };
           } catch (error: unknown) {
             return failedWithFor(label, error, key, 'removed');
