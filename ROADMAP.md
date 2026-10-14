@@ -1,5 +1,10 @@
 # ROADMAP
 
+## Shipped
+
+- **0.1.0**: the `StorageAdapter` contract and wrappers, moved from
+  `dashboard-widgets-toolkit`.
+
 ## Next
 
 1. **Generic `createPersistence<T>`**: codec, normalize hook, size limit,
