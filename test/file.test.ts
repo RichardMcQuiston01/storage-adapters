@@ -5,9 +5,10 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { encodeKey } from '../src/file/file.js';
-import { fileAdapter, type FileSystemLike } from '../src/file/index.js';
+import { fileAdapter } from '../src/file/index.js';
 import { nodeFileSystem } from '../src/file/node.js';
 import type { StoredValue, StoreResult } from '../src/storage.js';
+import { errorWithCode, fakeFileSystem } from './support/fake-file-system.js';
 
 const signal: AbortSignal = new AbortController().signal;
 
@@ -47,73 +48,6 @@ async function withDirectory(
 
 function realAdapter(directory: string): ReturnType<typeof fileAdapter> {
   return fileAdapter({ directory, fileSystem: nodeFileSystem() });
-}
-
-function errorWithCode(code: string, message = code): Error {
-  return Object.assign(new Error(message), { code });
-}
-
-/** An in-memory file system whose operations can be made to fail. */
-interface FakeFileSystem extends FileSystemLike {
-  readonly files: Map<string, string>;
-  readonly calls: string[];
-  failures: Partial<Record<keyof FileSystemLike, Error>>;
-}
-
-function fakeFileSystem(): FakeFileSystem {
-  const files = new Map<string, string>();
-  const calls: string[] = [];
-  const fake: FakeFileSystem = {
-    files,
-    calls,
-    failures: {},
-    readFile: (path) => {
-      calls.push(`readFile ${path}`);
-      if (fake.failures.readFile !== undefined) {
-        return Promise.reject(fake.failures.readFile);
-      }
-      const text = files.get(path);
-      return text === undefined
-        ? Promise.reject(errorWithCode('ENOENT'))
-        : Promise.resolve(text);
-    },
-    writeFile: (path, data) => {
-      calls.push(`writeFile ${path}`);
-      if (fake.failures.writeFile !== undefined) {
-        return Promise.reject(fake.failures.writeFile);
-      }
-      files.set(path, data);
-      return Promise.resolve();
-    },
-    rename: (fromPath, toPath) => {
-      calls.push(`rename ${fromPath}`);
-      if (fake.failures.rename !== undefined) {
-        return Promise.reject(fake.failures.rename);
-      }
-      const text = files.get(fromPath);
-      if (text === undefined) {
-        return Promise.reject(errorWithCode('ENOENT'));
-      }
-      files.delete(fromPath);
-      files.set(toPath, text);
-      return Promise.resolve();
-    },
-    remove: (path) => {
-      calls.push(`remove ${path}`);
-      if (fake.failures.remove !== undefined) {
-        return Promise.reject(fake.failures.remove);
-      }
-      files.delete(path);
-      return Promise.resolve();
-    },
-    mkdir: (path) => {
-      calls.push(`mkdir ${path}`);
-      return fake.failures.mkdir !== undefined
-        ? Promise.reject(fake.failures.mkdir)
-        : Promise.resolve();
-    },
-  };
-  return fake;
 }
 
 void describe('encodeKey', () => {
@@ -536,7 +470,7 @@ void describe('fileAdapter on a real directory', () => {
 
 void describe('fileAdapter error handling', () => {
   void it('does not touch the file system when the request is already aborted', async () => {
-    const fileSystem = fakeFileSystem();
+    const fileSystem = fakeFileSystem(false);
     const adapter = fileAdapter({ directory: '/data', fileSystem });
     const controller = new AbortController();
     controller.abort();
@@ -556,7 +490,7 @@ void describe('fileAdapter error handling', () => {
   });
 
   void it('maps a full disk to quota, removes the temporary file and keeps the old value', async () => {
-    const fileSystem = fakeFileSystem();
+    const fileSystem = fakeFileSystem(false);
     const adapter = fileAdapter({ directory: '/data', fileSystem });
     expectOk(await adapter.set('a', 'one', { signal }));
     fileSystem.failures.writeFile = errorWithCode(
@@ -575,7 +509,7 @@ void describe('fileAdapter error handling', () => {
   });
 
   void it('maps permission errors to forbidden and cleans up when the rename fails', async () => {
-    const fileSystem = fakeFileSystem();
+    const fileSystem = fakeFileSystem(false);
     const adapter = fileAdapter({ directory: '/data', fileSystem });
     expectOk(await adapter.set('a', 'one', { signal }));
     for (const code of ['EACCES', 'EPERM', 'EROFS']) {
@@ -596,14 +530,14 @@ void describe('fileAdapter error handling', () => {
   });
 
   void it('maps a quota error from the disk-quota code too', async () => {
-    const fileSystem = fakeFileSystem();
+    const fileSystem = fakeFileSystem(false);
     fileSystem.failures.writeFile = errorWithCode('EDQUOT');
     const adapter = fileAdapter({ directory: '/data', fileSystem });
     expectFailure(await adapter.set('a', 'v', { signal }), 'quota', 'a');
   });
 
   void it('maps any other error to unavailable, and an ENOENT on read to a missing key', async () => {
-    const fileSystem = fakeFileSystem();
+    const fileSystem = fakeFileSystem(false);
     const adapter = fileAdapter({ directory: '/data', fileSystem });
     fileSystem.failures.readFile = errorWithCode('EIO', 'EIO: i/o error');
     expectFailure(await adapter.get('a', { signal }), 'unavailable', 'a');
@@ -618,7 +552,7 @@ void describe('fileAdapter error handling', () => {
   });
 
   void it('does not remember a failed directory setup, so the next call tries again', async () => {
-    const fileSystem = fakeFileSystem();
+    const fileSystem = fakeFileSystem(false);
     fileSystem.failures.mkdir = errorWithCode('EROFS');
     const adapter = fileAdapter({ directory: '/data', fileSystem });
     expectFailure(await adapter.set('a', 'v', { signal }), 'forbidden', 'a');
@@ -635,7 +569,7 @@ void describe('fileAdapter error handling', () => {
   });
 
   void it('releases the queue after a failure, so a write queued behind it still goes through', async () => {
-    const fileSystem = fakeFileSystem();
+    const fileSystem = fakeFileSystem(false);
     const writeFile = fileSystem.writeFile;
     let failNextWrite = true;
     fileSystem.writeFile = (path, data) => {
@@ -655,7 +589,7 @@ void describe('fileAdapter error handling', () => {
   });
 
   void it('reports the original error even when the temporary file cannot be removed', async () => {
-    const fileSystem = fakeFileSystem();
+    const fileSystem = fakeFileSystem(false);
     fileSystem.failures = {
       writeFile: errorWithCode('ENOSPC'),
       remove: errorWithCode('EIO'),
@@ -665,7 +599,7 @@ void describe('fileAdapter error handling', () => {
   });
 
   void it('only ever writes under the directory it was given', async () => {
-    const fileSystem = fakeFileSystem();
+    const fileSystem = fakeFileSystem(false);
     const adapter = fileAdapter({ directory: '/data/store/', fileSystem });
     for (const key of ['../x', 'a/b', '..', '/etc/passwd']) {
       expectOk(await adapter.set(key, 'v', { signal }));
