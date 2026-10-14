@@ -17,11 +17,51 @@ Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value c
 
 ### Prerequisites
 
+Node 18+ or Bun 1.3+. TypeScript is optional but recommended; the package
+ships declarations for ESM and CommonJS.
+
 ### Installation
+
+```bash
+bun add @richardmcquiston01/storage-adapters
+# or: npm install @richardmcquiston01/storage-adapters
+```
 
 ### Usage
 
+An adapter is an async key-value store with typed errors and optional
+revisions for conflict detection. Results are values you check, never
+thrown errors.
+
+```ts
+import {
+  memoryAdapter,
+  withFallback,
+  withPrefix,
+  type StorageAdapter,
+} from '@richardmcquiston01/storage-adapters';
+
+const adapter: StorageAdapter = withPrefix(
+  withFallback(myBrowserAdapter, memoryAdapter()),
+  'my-app:'
+);
+
+const signal: AbortSignal = new AbortController().signal;
+const saved = await adapter.set('theme', 'dark', { signal });
+if (!saved.ok) {
+  console.error(saved.code, saved.error); // names the key and the cause
+}
+```
+
+Wrappers: `withPrefix`, `withFallback`, `withReadCache`, `readOnly`,
+`withRetry` (you pass `sleep`, so there are no timers), `withEncoding`
+(compression or encryption, with your own functions) and `withLogging`
+(keys and outcomes, never values). Implement `get`, `set` and optionally
+`remove` and `subscribe` for localStorage, IndexedDB, REST or a database.
+
 ### Examples
+
+See `test/adapters.test.ts` for each wrapper in use.
 
 [Back to Top](#table-of-contents)
 

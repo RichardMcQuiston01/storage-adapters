@@ -1,4 +1,7 @@
 node_modules
-.next
-out
-package-lock.json
+dist
+coverage
+bun.lock
+CHANGELOG.md
+.changeset/*.md
+README.md
