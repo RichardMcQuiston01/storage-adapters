@@ -90,6 +90,16 @@
         "default": "./dist/file-node.cjs"
       }
     },
+    "./json-file": {
+      "import": {
+        "types": "./dist/json-file.d.ts",
+        "default": "./dist/json-file.js"
+      },
+      "require": {
+        "types": "./dist/json-file.d.cts",
+        "default": "./dist/json-file.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -108,6 +118,9 @@
       ],
       "file/node": [
         "./dist/file-node.d.ts"
+      ],
+      "json-file": [
+        "./dist/json-file.d.ts"
       ]
     }
   },

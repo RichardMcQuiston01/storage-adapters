@@ -9,8 +9,9 @@
 - **0.3.0**: the `/browser` entry point with `localStorageAdapter()`.
 - **0.4.0**: the `/indexeddb` entry point with `indexedDbAdapter()` and the
   `/sqlite` entry point with `sqliteAdapter()`.
-- **0.5.0**: `sessionStorageAdapter()` in `/browser` and the `/file` entry point
-  with `fileAdapter()` (and `nodeFileSystem()` in `/file/node`).
+- **0.5.0**: `sessionStorageAdapter()` in `/browser`, the `/file` entry point
+  with `fileAdapter()` (and `nodeFileSystem()` in `/file/node`), and the
+  `/json-file` entry point with `jsonFileAdapter()`.
 
 ## Ground rules for every new adapter
 
@@ -31,12 +32,7 @@
 
 ## Next
 
-1. **JSON file adapter** (`/json-file`). One JSON document holding every key:
-   `{ "<key>": { "r": "...", "v": "..." } }`. Atomic write by temp file and
-   rename. Loads once and caches, with an optional watch for outside edits.
-   Best for small config and settings data; the docs will say where to prefer
-   the flat file or SQLite adapters.
-2. **YAML and INI file adapters** (`/yaml-file`, `/ini-file`). The same
+1. **YAML and INI file adapters** (`/yaml-file`, `/ini-file`). The same
    single-document design as the JSON file adapter, for settings people edit by
    hand. The document code is shared and takes a small `{ parse, stringify }`
    codec, so the `yaml` and `ini` packages plug in and no parser is bundled.
@@ -44,9 +40,9 @@
    the revision worked out from the value instead of stored beside it, so an
    edit made by hand is noticed as a new revision. INI is flat and string-only,
    so a value it cannot hold on one line is refused with `invalid` rather than
-   mangled. The JSON file adapter is built first, with the codec seam, so these
-   two are thin wrappers.
-3. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
+   mangled. The JSON file adapter shipped with the shared document engine these
+   build on, so each one is a codec plus an entry layout.
+2. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
    adapters over a minimal `query(sql, params)` interface, so `mysql2`, `pg`,
    `postgres` and similar clients all fit. Same `storage_entry` table as
    SQLite, using native `UUID` on Postgres and `CHAR(36)` on MySQL, with
