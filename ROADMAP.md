@@ -66,8 +66,18 @@
 
 ## Eventually
 
-Cloud backends. They follow the six above and reuse the shared conformance
-suite.
+Cloud and server backends. They follow the six above and reuse the shared
+conformance suite.
+
+- **Redis adapter** (`/redis`). One Redis hash per key holding `r` (revision)
+  and `v` (value), over a minimal `RedisLike` interface so `ioredis`, `redis`
+  and similar clients all fit. A short Lua script (or `WATCH`/`MULTI`) checks
+  the revision and writes in one step, so `ifRevision` conflicts are atomic
+  across processes. `subscribe` uses Pub/Sub on a channel per key prefix, so it
+  does not depend on server keyspace-notification settings. An optional
+  `ttlSeconds` option sets expiry for cache-style data, and an expired key
+  reads as missing. Integration tests run only when a Redis URL is set in the
+  environment.
 
 - **S3 and DigitalOcean Spaces adapter** (`/s3`). One object per key, over a
   minimal `ObjectStoreLike` interface so the AWS SDK, a presigned-URL client or
