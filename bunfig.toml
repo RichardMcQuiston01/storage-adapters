@@ -1,0 +1,4 @@
+[run]
+# Run package bins (tsc, tsup, eslint, prettier, changeset) on Bun even though
+# their shebangs say node, so Node.js is not required to develop.
+bun = true
