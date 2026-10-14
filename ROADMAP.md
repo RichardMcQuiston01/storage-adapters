@@ -64,6 +64,24 @@
    MySQL. Integration tests run against a real server only when a connection
    string is set in the environment, so the default test run stays offline.
 
+## Eventually
+
+Cloud backends. They follow the six above and reuse the shared conformance
+suite.
+
+- **S3 and DigitalOcean Spaces adapter** (`/s3`). One object per key, over a
+  minimal `ObjectStoreLike` interface so the AWS SDK, a presigned-URL client or
+  any S3-compatible service fits. The object's ETag is the revision, and
+  `ifRevision` maps to an `If-Match` conditional write. Spaces may not honour
+  conditional writes, so the adapter checks for support and returns `invalid`
+  with a clear message instead of silently losing the conflict check.
+  `subscribe` is a no-op.
+- **Firebase adapter** (`/firebase`). Firestore first, with one document per
+  key. A transaction makes the revision check atomic, and `onSnapshot` powers
+  `subscribe`. The Realtime Database can follow if there is demand. The
+  Firebase SDK is an optional peer dependency, and security rules stay the
+  consumer's job.
+
 ## Later
 
 - REST adapter for a remote key-value API.
