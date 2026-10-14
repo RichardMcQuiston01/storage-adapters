@@ -1,7 +1,0 @@
----
-'@richardmcquiston01/storage-adapters': minor
----
-
-Add the optional `@richardmcquiston01/storage-adapters/json-file` entry point with `jsonFileAdapter({ path, fileSystem })`: a `StorageAdapter` that keeps every key in one readable JSON file, `{ "<key>": { "r": "1", "v": "..." } }`, sorted by key. The file is read once and cached; each write re-reads it, changes one entry and replaces the whole file through a temporary file and a rename, and writes are queued so `set` with `ifRevision` returns `conflict` when another write in the same process got there first. Any string is a valid key. A file that is not a JSON object is never overwritten: every call returns `corrupt` until it is fixed. An invalid entry is `corrupt` for its own key only. With a `FileSystemLike` that can watch, an outside edit, in place or by an editor that replaces the file, is noticed and reported to subscribers of the keys that changed (`watch: false` turns that off; `cache: false` reads the file on every `get`). Maps a full disk to `quota`, permission errors to `forbidden` and anything else to `unavailable`, and never throws. Safe within one process only, like the file adapter. The main entry stays free of I/O.
-
-`FileSystemLike` (from `/file`) gains an optional `watch(path, onChange)` method, and `nodeFileSystem()` (from `/file/node`) implements it with `fs.watch` on the file's folder, so a file replaced by a rename is still noticed. The watcher does not keep the program running.
