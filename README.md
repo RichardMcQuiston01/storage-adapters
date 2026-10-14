@@ -17,11 +17,26 @@ Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value c
 
 ### Prerequisites
 
+Node 18+ or Bun 1.3+. TypeScript is optional but recommended; the package
+ships declarations for ESM and CommonJS.
+
 ### Installation
+
+```bash
+bun add @richardmcquiston01/storage-adapters
+# or: npm install @richardmcquiston01/storage-adapters
+```
 
 ### Usage
 
+> **Status:** package skeleton. The adapter contract, wrappers and
+> persistence helper are moved over from
+> [`dashboard-widgets-toolkit`](https://github.com/RichardMcQuiston01/dashboard-widgets-toolkit)
+> in the next release. See [ROADMAP.md](./ROADMAP.md).
+
 ### Examples
+
+Coming with the first feature release.
 
 [Back to Top](#table-of-contents)
 
