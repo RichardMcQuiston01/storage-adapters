@@ -4,6 +4,8 @@
 
 - **0.1.0**: the `StorageAdapter` contract and wrappers, moved from
   `dashboard-widgets-toolkit`.
+- **0.2.0**: `createPersistence<T>`: typed persistence with a versioned
+  envelope, conflict policies, serialized saves and `watch`.
 
 ## Next
 
