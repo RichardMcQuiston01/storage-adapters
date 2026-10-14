@@ -176,6 +176,60 @@ were lost. Use the SQLite adapter when more than one process writes. The adapter
 does not `fsync`, so a power failure shortly after a write can lose it.
 `subscribe` reports changes made through adapters in this process.
 
+#### JSON file storage
+
+For small amounts of data that a person might open and edit, such as settings,
+use `jsonFileAdapter` from the optional `/json-file` entry point. It keeps every
+key in one JSON file. Like the file adapter, it imports no file system module:
+pass `nodeFileSystem()` from `/file/node`, or your own `FileSystemLike`.
+
+```ts
+import { nodeFileSystem } from '@richardmcquiston01/storage-adapters/file/node';
+import { jsonFileAdapter } from '@richardmcquiston01/storage-adapters/json-file';
+
+const settings: StorageAdapter = jsonFileAdapter({
+  path: './config/settings.json',
+  fileSystem: nodeFileSystem(),
+});
+```
+
+The file is readable and sorted by key, one entry per key:
+
+```json
+{
+  "theme": { "r": "3", "v": "dark" }
+}
+```
+
+`r` is the counter revision and `v` is the value. The file is read once and kept
+in memory. Every write starts from the file again, changes one entry, and replaces
+the whole file through a temporary file and a rename, so a reader never sees half
+of a write and an edit made outside to another key is kept. Writes are queued, so
+`set` with `ifRevision` returns `conflict` when another write got there first. The
+folder is created on first write. Any string is a valid key.
+
+When something is subscribed and the file system can watch (`nodeFileSystem()`
+can), the file is watched, and an edit made outside, in place or by an editor that
+replaces the file, is picked up and reported to subscribers of the keys that
+changed. Pass `watch: false` to turn that off. Without a watcher, an outside edit
+is not seen by `get` until the next write; pass `cache: false` to read the file on
+every `get` instead. If you edit a value by hand, change its `r` too, or a writer
+holding the old revision will not see a conflict.
+
+A file that is not a JSON object is never overwritten: every call returns
+`corrupt`, naming the file, until you fix it, and the file is left exactly as it
+was. One entry that is not valid is `corrupt` for that key only, and the next
+`set` replaces just that entry. A full disk is `quota`, a permission error is
+`forbidden`, and nothing throws.
+
+Choose by how much data you have and who writes it:
+
+| Adapter | Good for | Limit |
+| --- | --- | --- |
+| `jsonFileAdapter` | Settings a person may edit by hand | Rewrites the whole file on each write; one process |
+| `fileAdapter` | Many or large values | One process per directory |
+| `sqliteAdapter` | Several processes writing | Needs a SQLite driver |
+
 #### Typed persistence
 
 `createPersistence<T>` stores one kind of value with a versioned envelope, a
@@ -220,7 +274,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter and `test/file.test.ts` for the file adapter.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter and `test/file.test.ts` for the file adapter and `test/json-file.test.ts` for the JSON file adapter.
 
 [Back to Top](#table-of-contents)
 

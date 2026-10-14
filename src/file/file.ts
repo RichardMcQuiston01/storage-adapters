@@ -4,7 +4,7 @@
  * of I/O, and this file imports no file system module. You pass in a
  * `FileSystemLike`; `nodeFileSystem()` from `/file/node` covers Node, Bun and Deno.
  */
-import { describeUnknownError } from '../errors.js';
+import { errorCodeOf, failedWithFor, failureFor, withLock } from './shared.js';
 import type {
   StorageAdapter,
   StoredValue,
@@ -27,6 +27,12 @@ export interface FileSystemLike {
   remove(path: string): Promise<void>;
   /** Creates a directory and any missing parents. An existing one is not an error. */
   mkdir(path: string): Promise<void>;
+  /**
+   * Optional. Calls `onChange` whenever the file at `path` is created, changed,
+   * replaced or removed, including by another program. Returns a function that stops
+   * watching. A file replaced by a rename must still be noticed.
+   */
+  watch?(path: string, onChange: () => void): () => void;
 }
 
 export interface FileAdapterOptions {
@@ -45,9 +51,6 @@ const FILE_EXTENSION = '.json';
 
 /** Longest encoded key. File names are limited to 255 bytes on common systems. */
 const MAX_ENCODED_KEY_LENGTH = 200;
-
-/** Per-key locks, shared by every adapter in this process, keyed by directory and file. */
-const locks = new Map<string, Promise<void>>();
 
 /**
  * Turns a key into a file name stem that is safe on every common file system,
@@ -124,34 +127,14 @@ function parseEnvelope(text: string): Envelope | undefined {
   return undefined;
 }
 
-function errorCodeOf(error: unknown): string {
-  if (typeof error !== 'object' || error === null) {
-    return '';
-  }
-  const code: unknown = (error as { code?: unknown }).code;
-  return typeof code === 'string' ? code : '';
-}
-
-function classifyError(error: unknown): StoreErrorCode {
-  switch (errorCodeOf(error)) {
-    case 'ENOSPC':
-    case 'EDQUOT':
-      return 'quota';
-    case 'EACCES':
-    case 'EPERM':
-    case 'EROFS':
-      return 'forbidden';
-    default:
-      return 'unavailable';
-  }
-}
+const LABEL = 'File storage';
 
 function failure<T>(
   code: StoreErrorCode,
   key: string,
   detail: string
 ): StoreResult<T> {
-  return { ok: false, code, error: `File storage ${detail} for key "${key}"` };
+  return failureFor(LABEL, code, key, detail);
 }
 
 function failedWith<T>(
@@ -159,28 +142,7 @@ function failedWith<T>(
   key: string,
   verb: string
 ): StoreResult<T> {
-  return failure(
-    classifyError(error),
-    key,
-    `could not be ${verb} (${describeUnknownError(error)})`
-  );
-}
-
-/** Runs `task` after every earlier task for the same lock name has finished. */
-function withLock<T>(name: string, task: () => Promise<T>): Promise<T> {
-  const previous: Promise<void> = locks.get(name) ?? Promise.resolve();
-  const result: Promise<T> = previous.then(task, task);
-  const tail: Promise<void> = result.then(
-    () => undefined,
-    () => undefined
-  );
-  locks.set(name, tail);
-  void tail.then(() => {
-    if (locks.get(name) === tail) {
-      locks.delete(name);
-    }
-  });
-  return result;
+  return failedWithFor(LABEL, error, key, verb);
 }
 
 /**

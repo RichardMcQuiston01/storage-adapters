@@ -10,6 +10,7 @@ export default defineConfig({
     sqlite: 'src/sqlite/index.ts',
     file: 'src/file/index.ts',
     'file-node': 'src/file/node.ts',
+    'json-file': 'src/json-file/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: {
