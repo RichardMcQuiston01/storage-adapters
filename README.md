@@ -77,6 +77,26 @@ changes made in other tabs. A full store is `quota`, blocked storage is
 `forbidden`, and nothing throws. Pass `storage` or `events` to use something
 other than the global `localStorage` and `window`.
 
+#### IndexedDB storage
+
+For values too large or too many for `localStorage`, use `indexedDbAdapter` from
+the optional `/indexeddb` entry point.
+
+```ts
+import { createPersistence } from '@richardmcquiston01/storage-adapters';
+import { indexedDbAdapter } from '@richardmcquiston01/storage-adapters/indexeddb';
+
+const adapter: StorageAdapter = indexedDbAdapter({ databaseName: 'my-app' });
+```
+
+It uses the same counter revisions as `localStorageAdapter`, and the revision
+check and the write run in one transaction, so two tabs racing with the same
+`ifRevision` cannot both win: one gets `conflict`. `subscribe` reports changes
+made by other tabs through a `BroadcastChannel`, and does nothing where there is
+none. A full disk is `quota`, blocked storage is `forbidden`, and nothing
+throws. Pass `factory`, `storeName` or `channel` to use something other than
+the global `indexedDB` and `BroadcastChannel`.
+
 #### Typed persistence
 
 `createPersistence<T>` stores one kind of value with a versioned envelope, a
@@ -121,7 +141,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, and `test/browser.test.ts` for the browser adapter.
+See `test/adapters.test.ts` for each wrapper in use, and `test/browser.test.ts` for the browser adapter and `test/indexeddb.test.ts` for the IndexedDB adapter.
 
 [Back to Top](#table-of-contents)
 
