@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 0.6.0
+
+### Minor Changes
+
+- 330d782: Add the optional `@richardmcquiston01/storage-adapters/yaml-file` and `@richardmcquiston01/storage-adapters/ini-file` entry points with `yamlFileAdapter({ path, fileSystem, yaml })` and `iniFileAdapter({ path, fileSystem, ini })`: `StorageAdapter`s that keep every key in one hand-editable file, `key: value` in YAML and `key=value` in INI. No parser is bundled; pass in the `yaml` or `ini` package (anything with `parse` and `stringify`). There is no revision in the file: the revision is a fingerprint of the value, so a hand edit is noticed as a new revision and a layout or comment change is not. A value is text (a string, `true`/`false`, or a whole number); anything else is `corrupt` for that key and is kept as it is when other keys are written. A key or value the format would not read back as the same text, such as the INI value `null` or key `a=b`, is refused with `invalid` before anything is written. Like `jsonFileAdapter`: cached reads, queued writes that replace the file atomically, a broken file is never overwritten, outside edits noticed when the file system can watch, `cache` and `watch` options. Comments and layout are not kept when the adapter writes. Safe within one process only. The main entry stays free of I/O.
+
+### Patch Changes
+
+- 330d782: Fix `jsonFileAdapter` serving a stale value after a conflict. When `set` found that the file had changed outside (a revision conflict, or a refused write), it left its cached copy as it was, so a caller that re-read with `get` and retried got the old value and the old revision, and conflicted again until something else refreshed the cache. Now every fresh read of the file updates what `get` returns, and subscribers are told about any outside change found while writing instead of missing it.
+
 ## 0.5.0
 
 ### Minor Changes

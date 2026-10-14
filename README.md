@@ -214,7 +214,8 @@ replaces the file, is picked up and reported to subscribers of the keys that
 changed. Pass `watch: false` to turn that off. Without a watcher, an outside edit
 is not seen by `get` until the next write; pass `cache: false` to read the file on
 every `get` instead. If you edit a value by hand, change its `r` too, or a writer
-holding the old revision will not see a conflict.
+holding the old revision will not see a conflict. (The YAML and INI adapters below
+work out the revision from the value, so they have no such step.)
 
 A file that is not a JSON object is never overwritten: every call returns
 `corrupt`, naming the file, until you fix it, and the file is left exactly as it
@@ -227,8 +228,71 @@ Choose by how much data you have and who writes it:
 | Adapter | Good for | Limit |
 | --- | --- | --- |
 | `jsonFileAdapter` | Settings a person may edit by hand | Rewrites the whole file on each write; one process |
+| `yamlFileAdapter`, `iniFileAdapter` | Settings a person edits by hand in YAML or INI | Rewrites the whole file and drops comments; one process |
 | `fileAdapter` | Many or large values | One process per directory |
 | `sqliteAdapter` | Several processes writing | Needs a SQLite driver |
+
+#### YAML and INI file storage
+
+For settings that people edit by hand in a format they already know, use
+`yamlFileAdapter` from `/yaml-file` or `iniFileAdapter` from `/ini-file`. They work
+like the JSON file adapter: one file holds every key, read once and cached, written
+through a temporary file and a rename, queued, never overwriting a broken file, and
+watched for outside edits when the file system can watch. No parser is bundled. You
+pass in the library you use, so it is also the one that decides the exact syntax.
+
+```ts
+import YAML from 'yaml';
+import * as ini from 'ini';
+import { nodeFileSystem } from '@richardmcquiston01/storage-adapters/file/node';
+import { iniFileAdapter } from '@richardmcquiston01/storage-adapters/ini-file';
+import { yamlFileAdapter } from '@richardmcquiston01/storage-adapters/yaml-file';
+
+const settings: StorageAdapter = yamlFileAdapter({
+  path: './config/settings.yaml',
+  fileSystem: nodeFileSystem(),
+  yaml: YAML,
+});
+const legacy: StorageAdapter = iniFileAdapter({
+  path: './config/app.ini',
+  fileSystem: nodeFileSystem(),
+  ini,
+});
+```
+
+Install the library you pass in (`yaml` or `ini`). The `ini` package ships no types,
+so a TypeScript project also needs `@types/ini`.
+
+The file stays as plain as you would write it, one entry per key:
+
+```yaml
+name: dark
+port: "8080"
+```
+
+```ini
+name=dark
+port=8080
+```
+
+There is no revision stored in the file. The revision is a fingerprint of the value,
+so changing a value by hand is noticed as a new revision, and a writer holding the
+old one gets `conflict`, while retyping the layout or a comment changes nothing.
+The same text always has the same revision.
+
+A value is text. A string is taken as it is, `true` and `false` as that text, and in
+YAML a whole number such as `8080` as that text. Anything else is `corrupt` for
+that key and left alone when the adapter writes other keys: a decimal (`1.10` is
+already `1.1` by the time it is parsed, so write `"1.10"`), a list, a nested block,
+a section, or an empty or `null` value. A key or value the format would not read
+back as the same text is refused with `invalid` before anything is written. In INI
+that means the value `null` and keys such as `a=b`, `a[]`, `__proto__` and the empty
+key; YAML holds everything, including multi-line text. Use a parser that does not run
+code (the `yaml` package's `parse` is safe).
+
+**The adapter rewrites the whole file when it writes, and does not keep comments or
+layout.** Comments are safe only while the program just reads the file; the first
+write removes them. Like the other file adapters, it is safe within one process only.
 
 #### Typed persistence
 
@@ -274,7 +338,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter and `test/file.test.ts` for the file adapter and `test/json-file.test.ts` for the JSON file adapter.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 

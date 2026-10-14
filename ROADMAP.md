@@ -12,6 +12,9 @@
 - **0.5.0**: `sessionStorageAdapter()` in `/browser`, the `/file` entry point
   with `fileAdapter()` (and `nodeFileSystem()` in `/file/node`), and the
   `/json-file` entry point with `jsonFileAdapter()`.
+- **0.6.0**: the `/yaml-file` and `/ini-file` entry points with
+  `yamlFileAdapter()` and `iniFileAdapter()`, and a fix for a stale cache in
+  `jsonFileAdapter()` after a conflict.
 
 ## Ground rules for every new adapter
 
@@ -32,17 +35,7 @@
 
 ## Next
 
-1. **YAML and INI file adapters** (`/yaml-file`, `/ini-file`). The same
-   single-document design as the JSON file adapter, for settings people edit by
-   hand. The document code is shared and takes a small `{ parse, stringify }`
-   codec, so the `yaml` and `ini` packages plug in and no parser is bundled.
-   Entries stay readable: `key: value` in YAML and `key = value` in INI, with
-   the revision worked out from the value instead of stored beside it, so an
-   edit made by hand is noticed as a new revision. INI is flat and string-only,
-   so a value it cannot hold on one line is refused with `invalid` rather than
-   mangled. The JSON file adapter shipped with the shared document engine these
-   build on, so each one is a codec plus an entry layout.
-2. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
+1. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
    adapters over a minimal `query(sql, params)` interface, so `mysql2`, `pg`,
    `postgres` and similar clients all fit. Same `storage_entry` table as
    SQLite, using native `UUID` on Postgres and `CHAR(36)` on MySQL, with
@@ -82,6 +75,9 @@ conformance suite.
 
 ## Later
 
+- Keep comments and layout when writing YAML, by editing the parsed document
+  instead of rewriting it (the `yaml` package can do this). INI has no such option
+  in the `ini` package.
 - REST adapter for a remote key-value API.
 - Optional `list(prefix, options)` on `StorageAdapter`, to list or clear keys.
   Useful once the file and database adapters exist.

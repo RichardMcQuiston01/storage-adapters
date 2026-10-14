@@ -11,10 +11,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import type { FileSystemLike } from '../src/file/index.js';
 import { nodeFileSystem } from '../src/file/node.js';
 import { jsonFileAdapter } from '../src/json-file/index.js';
 import type { StoredValue, StoreResult } from '../src/storage.js';
+import {
+  errorWithCode,
+  fakeFileSystem,
+  pause,
+  waitFor,
+} from './support/fake-file-system.js';
 
 const signal: AbortSignal = new AbortController().signal;
 
@@ -49,116 +54,6 @@ async function withDirectory(
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-}
-
-function errorWithCode(code: string, message = code): Error {
-  return Object.assign(new Error(message), { code });
-}
-
-/** Polls until `check` is true, or fails after `milliseconds`. */
-async function waitFor(
-  check: () => boolean,
-  description: string,
-  milliseconds = 3000
-): Promise<void> {
-  const deadline: number = Date.now() + milliseconds;
-  while (!check()) {
-    if (Date.now() > deadline) {
-      assert.fail(`timed out waiting for ${description}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
-function pause(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-/** An in-memory file system that can fail on demand and fire its watchers. */
-interface FakeFileSystem extends FileSystemLike {
-  readonly files: Map<string, string>;
-  readonly calls: string[];
-  readonly watchers: Set<{ path: string; onChange: () => void }>;
-  failures: Partial<
-    Record<'readFile' | 'writeFile' | 'rename' | 'remove' | 'mkdir', Error>
-  >;
-  fire(path: string): void;
-}
-
-function fakeFileSystem(withWatch = true): FakeFileSystem {
-  const files = new Map<string, string>();
-  const calls: string[] = [];
-  const watchers = new Set<{ path: string; onChange: () => void }>();
-  const fake: FakeFileSystem = {
-    files,
-    calls,
-    watchers,
-    failures: {},
-    fire: (path) => {
-      for (const watcher of [...watchers]) {
-        if (watcher.path === path) {
-          watcher.onChange();
-        }
-      }
-    },
-    readFile: (path) => {
-      calls.push(`readFile ${path}`);
-      if (fake.failures.readFile !== undefined) {
-        return Promise.reject(fake.failures.readFile);
-      }
-      const text = files.get(path);
-      return text === undefined
-        ? Promise.reject(errorWithCode('ENOENT'))
-        : Promise.resolve(text);
-    },
-    writeFile: (path, data) => {
-      calls.push(`writeFile ${path}`);
-      if (fake.failures.writeFile !== undefined) {
-        return Promise.reject(fake.failures.writeFile);
-      }
-      files.set(path, data);
-      return Promise.resolve();
-    },
-    rename: (fromPath, toPath) => {
-      calls.push(`rename ${fromPath}`);
-      if (fake.failures.rename !== undefined) {
-        return Promise.reject(fake.failures.rename);
-      }
-      const text = files.get(fromPath);
-      if (text === undefined) {
-        return Promise.reject(errorWithCode('ENOENT'));
-      }
-      files.delete(fromPath);
-      files.set(toPath, text);
-      return Promise.resolve();
-    },
-    remove: (path) => {
-      calls.push(`remove ${path}`);
-      if (fake.failures.remove !== undefined) {
-        return Promise.reject(fake.failures.remove);
-      }
-      files.delete(path);
-      return Promise.resolve();
-    },
-    mkdir: (path) => {
-      calls.push(`mkdir ${path}`);
-      return fake.failures.mkdir !== undefined
-        ? Promise.reject(fake.failures.mkdir)
-        : Promise.resolve();
-    },
-  };
-  if (withWatch) {
-    fake.watch = (path, onChange) => {
-      calls.push(`watch ${path}`);
-      const watcher = { path, onChange };
-      watchers.add(watcher);
-      return () => {
-        calls.push(`unwatch ${path}`);
-        watchers.delete(watcher);
-      };
-    };
-  }
-  return fake;
 }
 
 function realAdapter(
@@ -604,6 +499,83 @@ void describe('jsonFileAdapter caching and outside edits', () => {
       fileSystem.calls.filter((call) => call.startsWith('readFile')).length,
       reads
     );
+  });
+
+  void it('refreshes what get returns after a conflict, so a retry can succeed', async () => {
+    const fileSystem = fakeFileSystem(false);
+    fileSystem.files.set('/data/s.json', '{ "a": { "r": "1", "v": "mine" } }');
+    const adapter = jsonFileAdapter({ path: '/data/s.json', fileSystem });
+    const loaded = expectOk(await adapter.get('a', { signal }));
+    assert.equal(loaded?.revision, '1');
+    // Someone else changes the file by hand; there is no watcher to tell us.
+    fileSystem.files.set(
+      '/data/s.json',
+      '{ "a": { "r": "5", "v": "theirs" } }'
+    );
+    expectFailure(
+      await adapter.set('a', 'mine again', { signal, ifRevision: '1' }),
+      'conflict',
+      'a'
+    );
+    // The caller reads again to see what is there now. It must be the new value.
+    const reread = expectOk(await adapter.get('a', { signal }));
+    assert.deepEqual(reread, { value: 'theirs', revision: '5' });
+    // And retrying with that revision goes through.
+    assert.deepEqual(
+      expectOk(await adapter.set('a', 'merged', { signal, ifRevision: '5' })),
+      { value: 'merged', revision: '6' }
+    );
+  });
+
+  void it('refreshes what get returns after a refused write too', async () => {
+    const fileSystem = fakeFileSystem(false);
+    fileSystem.files.set('/data/s.json', '{ "a": { "r": "1", "v": "x" } }');
+    const adapter = jsonFileAdapter({ path: '/data/s.json', fileSystem });
+    expectOk(await adapter.get('a', { signal }));
+    fileSystem.files.set(
+      '/data/s.json',
+      '{ "a": { "r": "2", "v": "edited" } }'
+    );
+    fileSystem.failures.writeFile = errorWithCode('ENOSPC');
+    expectFailure(await adapter.set('b', 'v', { signal }), 'quota', 'b');
+    fileSystem.failures = {};
+    assert.equal(expectOk(await adapter.get('a', { signal }))?.value, 'edited');
+  });
+
+  void it('tells a subscriber about an outside change it finds while writing', async () => {
+    const fileSystem = fakeFileSystem(false);
+    fileSystem.files.set('/data/s.json', '{ "a": { "r": "1", "v": "x" } }');
+    const adapter = jsonFileAdapter({
+      path: '/data/s.json',
+      fileSystem,
+      watch: false,
+    });
+    expectOk(await adapter.get('a', { signal })); // load the picture
+    const seen: (StoredValue | null)[] = [];
+    adapter.subscribe?.('a', (stored) => seen.push(stored));
+    fileSystem.files.set(
+      '/data/s.json',
+      '{ "a": { "r": "2", "v": "edited" } }'
+    );
+    expectOk(await adapter.set('b', 'v', { signal }));
+    assert.deepEqual(seen, [{ value: 'edited', revision: '2' }]);
+    // A later watcher event for the same change has nothing new to report.
+    expectOk(await adapter.set('c', 'v', { signal }));
+    assert.equal(seen.length, 1);
+  });
+
+  void it('does not let a failed write change what it remembers', async () => {
+    const fileSystem = fakeFileSystem(false);
+    fileSystem.files.set('/data/s.json', '{ "a": { "r": "1", "v": "x" } }');
+    const adapter = jsonFileAdapter({ path: '/data/s.json', fileSystem });
+    expectOk(await adapter.get('a', { signal }));
+    fileSystem.failures.rename = errorWithCode('EACCES');
+    expectFailure(await adapter.set('a', 'lost', { signal }), 'forbidden', 'a');
+    fileSystem.failures = {};
+    assert.deepEqual(expectOk(await adapter.get('a', { signal })), {
+      value: 'x',
+      revision: '1',
+    });
   });
 });
 
