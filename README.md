@@ -97,6 +97,30 @@ none. A full disk is `quota`, blocked storage is `forbidden`, and nothing
 throws. Pass `factory`, `storeName` or `channel` to use something other than
 the global `indexedDB` and `BroadcastChannel`.
 
+#### SQLite storage
+
+For servers, scripts and desktop apps, use `sqliteAdapter` from the optional
+`/sqlite` entry point. It imports no driver: you open the database and pass it
+in, so it works with `node:sqlite` (Node 22.5 and later), Bun's `bun:sqlite`, or
+any driver with the same `exec` and `prepare` methods.
+
+```ts
+import { DatabaseSync } from 'node:sqlite';
+import { sqliteAdapter } from '@richardmcquiston01/storage-adapters/sqlite';
+
+const adapter: StorageAdapter = sqliteAdapter({
+  database: new DatabaseSync('app.db'),
+});
+```
+
+The table `storage_entry` is created on first use, with a UUID id, the key, the
+value, a counter revision, and `created_at` and `updated_at` timestamps. The
+revision check and the write are one SQL statement, so two connections racing
+with the same `ifRevision` cannot both win: one gets `conflict`. A full disk is
+`quota`, a read-only database is `forbidden`, a damaged file is `corrupt`, and
+nothing throws. `subscribe` reports changes made through the same adapter, like
+`memoryAdapter`; SQLite cannot announce writes made by other processes.
+
 #### Typed persistence
 
 `createPersistence<T>` stores one kind of value with a versioned envelope, a
@@ -141,7 +165,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, and `test/browser.test.ts` for the browser adapter and `test/indexeddb.test.ts` for the IndexedDB adapter.
+See `test/adapters.test.ts` for each wrapper in use, and `test/browser.test.ts` for the browser adapter `test/indexeddb.test.ts` for the IndexedDB adapter and `test/sqlite.test.ts` for the SQLite adapter.
 
 [Back to Top](#table-of-contents)
 
