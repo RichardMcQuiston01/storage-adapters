@@ -1,6 +1,6 @@
 {
   "name": "@richardmcquiston01/storage-adapters",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value contract with typed errors and revisions, composable wrappers (prefix, fallback, retry, cache, encoding), and a generic persistence helper with conflict handling. No I/O in the core.",
   "keywords": [
     "typescript",
@@ -70,6 +70,36 @@
         "default": "./dist/sqlite.cjs"
       }
     },
+    "./file": {
+      "import": {
+        "types": "./dist/file.d.ts",
+        "default": "./dist/file.js"
+      },
+      "require": {
+        "types": "./dist/file.d.cts",
+        "default": "./dist/file.cjs"
+      }
+    },
+    "./file/node": {
+      "import": {
+        "types": "./dist/file-node.d.ts",
+        "default": "./dist/file-node.js"
+      },
+      "require": {
+        "types": "./dist/file-node.d.cts",
+        "default": "./dist/file-node.cjs"
+      }
+    },
+    "./json-file": {
+      "import": {
+        "types": "./dist/json-file.d.ts",
+        "default": "./dist/json-file.js"
+      },
+      "require": {
+        "types": "./dist/json-file.d.cts",
+        "default": "./dist/json-file.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -82,6 +112,15 @@
       ],
       "sqlite": [
         "./dist/sqlite.d.ts"
+      ],
+      "file": [
+        "./dist/file.d.ts"
+      ],
+      "file/node": [
+        "./dist/file-node.d.ts"
+      ],
+      "json-file": [
+        "./dist/json-file.d.ts"
       ]
     }
   },

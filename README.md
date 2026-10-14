@@ -77,6 +77,21 @@ changes made in other tabs. A full store is `quota`, blocked storage is
 `forbidden`, and nothing throws. Pass `storage` or `events` to use something
 other than the global `localStorage` and `window`.
 
+For data that should last only as long as the tab, such as a half-finished form,
+use `sessionStorageAdapter` from the same entry point. It stores the same
+revisioned envelope, takes the same options, and reports the same errors, naming
+`sessionStorage` instead of `localStorage`.
+
+```ts
+import { sessionStorageAdapter } from '@richardmcquiston01/storage-adapters/browser';
+
+const draft: StorageAdapter = sessionStorageAdapter();
+```
+
+Each tab has its own `sessionStorage`, so `subscribe` only hears about writes
+from other documents in the same tab, such as same-origin iframes. Both adapters
+ignore a change made to the other kind of storage under the same key.
+
 #### IndexedDB storage
 
 For values too large or too many for `localStorage`, use `indexedDbAdapter` from
@@ -120,6 +135,100 @@ with the same `ifRevision` cannot both win: one gets `conflict`. A full disk is
 `quota`, a read-only database is `forbidden`, a damaged file is `corrupt`, and
 nothing throws. `subscribe` reports changes made through the same adapter, like
 `memoryAdapter`; SQLite cannot announce writes made by other processes.
+
+#### File storage
+
+For small servers, scripts and tools that want plain files, use `fileAdapter` from
+the optional `/file` entry point. It keeps one file per key in a directory. It
+imports no file system module, so you pass one in. `nodeFileSystem()` from
+`/file/node` is built on `node:fs/promises`; it works on Node and Bun, and Deno
+provides the same module.
+
+```ts
+import { fileAdapter } from '@richardmcquiston01/storage-adapters/file';
+import { nodeFileSystem } from '@richardmcquiston01/storage-adapters/file/node';
+
+const adapter: StorageAdapter = fileAdapter({
+  directory: './data',
+  fileSystem: nodeFileSystem(),
+});
+```
+
+A key becomes a safe file name: `a-z`, `0-9` and `-` stay as they are, an uppercase
+letter becomes `_` and its lowercase form, and every other byte becomes `~` and two
+hex digits. So `Layout/1` is stored as `_layout~2f1.json`, keys that differ only in
+case never share a file even on a case-insensitive disk, and no key can leave the
+directory. A key must be 1 to 200 characters after encoding and valid Unicode, or
+the call returns `invalid`. Each file holds the value and a counter revision as
+`{ "r": "1", "v": "..." }`.
+
+A write goes to a temporary file that is renamed over the real one, so a reader
+sees the old value or the new one, never half of a write. Writes to the same key
+are queued, so `set` with `ifRevision` returns `conflict` when another write got
+there first. A full disk is `quota`, a permission error is `forbidden`, a file that
+is not an entry is `corrupt`, and nothing throws. A crash can leave a `*.tmp` file
+behind; it is safe to delete.
+
+**Use one process per directory.** The queue lives in the process, so two
+processes writing the same directory can lose updates. In a test with four
+processes each adding 1 to a shared counter 40 times, about half of the additions
+were lost. Use the SQLite adapter when more than one process writes. The adapter
+does not `fsync`, so a power failure shortly after a write can lose it.
+`subscribe` reports changes made through adapters in this process.
+
+#### JSON file storage
+
+For small amounts of data that a person might open and edit, such as settings,
+use `jsonFileAdapter` from the optional `/json-file` entry point. It keeps every
+key in one JSON file. Like the file adapter, it imports no file system module:
+pass `nodeFileSystem()` from `/file/node`, or your own `FileSystemLike`.
+
+```ts
+import { nodeFileSystem } from '@richardmcquiston01/storage-adapters/file/node';
+import { jsonFileAdapter } from '@richardmcquiston01/storage-adapters/json-file';
+
+const settings: StorageAdapter = jsonFileAdapter({
+  path: './config/settings.json',
+  fileSystem: nodeFileSystem(),
+});
+```
+
+The file is readable and sorted by key, one entry per key:
+
+```json
+{
+  "theme": { "r": "3", "v": "dark" }
+}
+```
+
+`r` is the counter revision and `v` is the value. The file is read once and kept
+in memory. Every write starts from the file again, changes one entry, and replaces
+the whole file through a temporary file and a rename, so a reader never sees half
+of a write and an edit made outside to another key is kept. Writes are queued, so
+`set` with `ifRevision` returns `conflict` when another write got there first. The
+folder is created on first write. Any string is a valid key.
+
+When something is subscribed and the file system can watch (`nodeFileSystem()`
+can), the file is watched, and an edit made outside, in place or by an editor that
+replaces the file, is picked up and reported to subscribers of the keys that
+changed. Pass `watch: false` to turn that off. Without a watcher, an outside edit
+is not seen by `get` until the next write; pass `cache: false` to read the file on
+every `get` instead. If you edit a value by hand, change its `r` too, or a writer
+holding the old revision will not see a conflict.
+
+A file that is not a JSON object is never overwritten: every call returns
+`corrupt`, naming the file, until you fix it, and the file is left exactly as it
+was. One entry that is not valid is `corrupt` for that key only, and the next
+`set` replaces just that entry. A full disk is `quota`, a permission error is
+`forbidden`, and nothing throws.
+
+Choose by how much data you have and who writes it:
+
+| Adapter | Good for | Limit |
+| --- | --- | --- |
+| `jsonFileAdapter` | Settings a person may edit by hand | Rewrites the whole file on each write; one process |
+| `fileAdapter` | Many or large values | One process per directory |
+| `sqliteAdapter` | Several processes writing | Needs a SQLite driver |
 
 #### Typed persistence
 
@@ -165,7 +274,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, and `test/browser.test.ts` for the browser adapter `test/indexeddb.test.ts` for the IndexedDB adapter and `test/sqlite.test.ts` for the SQLite adapter.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter and `test/file.test.ts` for the file adapter and `test/json-file.test.ts` for the JSON file adapter.
 
 [Back to Top](#table-of-contents)
 

@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 0.5.0
+
+### Minor Changes
+
+- 01bc4a4: Add `sessionStorageAdapter()` to the `@richardmcquiston01/storage-adapters/browser` entry point: a `StorageAdapter` over `sessionStorage` for data that lasts as long as the tab. It shares its code, revisioned envelope, options (`storage`, `events`) and error mapping with `localStorageAdapter()`, and names `sessionStorage` in its errors. Each tab has its own `sessionStorage`, so `subscribe` hears about writes from other documents in the same tab, such as same-origin iframes.
+  
+  Also fix `subscribe` in both browser adapters: a `storage` event now carries which storage changed, and a change to the other kind of storage under the same key no longer reaches the subscriber. Before, a `sessionStorage` write in an iframe could wrongly notify a `localStorageAdapter()` subscriber for the same key. `StorageChangeEvent` gains an optional `storageArea` field, and an event without one is still accepted.
+- 8fa67a1: Add the optional `@richardmcquiston01/storage-adapters/json-file` entry point with `jsonFileAdapter({ path, fileSystem })`: a `StorageAdapter` that keeps every key in one readable JSON file, `{ "<key>": { "r": "1", "v": "..." } }`, sorted by key. The file is read once and cached; each write re-reads it, changes one entry and replaces the whole file through a temporary file and a rename, and writes are queued so `set` with `ifRevision` returns `conflict` when another write in the same process got there first. Any string is a valid key. A file that is not a JSON object is never overwritten: every call returns `corrupt` until it is fixed. An invalid entry is `corrupt` for its own key only. With a `FileSystemLike` that can watch, an outside edit, in place or by an editor that replaces the file, is noticed and reported to subscribers of the keys that changed (`watch: false` turns that off; `cache: false` reads the file on every `get`). Maps a full disk to `quota`, permission errors to `forbidden` and anything else to `unavailable`, and never throws. Safe within one process only, like the file adapter. The main entry stays free of I/O.
+  
+  `FileSystemLike` (from `/file`) gains an optional `watch(path, onChange)` method, and `nodeFileSystem()` (from `/file/node`) implements it with `fs.watch` on the file's folder, so a file replaced by a rename is still noticed. The watcher does not keep the program running.
+- 9c9337e: Add the optional `@richardmcquiston01/storage-adapters/file` entry point with `fileAdapter({ directory, fileSystem })`: a `StorageAdapter` that keeps one file per key in a directory. It imports no file system module; pass in a `FileSystemLike`, or use `nodeFileSystem()` from the new `@richardmcquiston01/storage-adapters/file/node` entry point (built on `node:fs/promises`, for Node, Bun and Deno). Keys are encoded into file names that are safe on every common file system, including case-insensitive ones, and cannot leave the directory. Writes go to a temporary file that is renamed into place, and writes to one key are queued, so `set` with `ifRevision` returns `conflict` when another write in the same process got there first. Maps a full disk to `quota`, permission errors to `forbidden`, a bad file to `corrupt`, an unusable key to `invalid` and anything else to `unavailable`, and never throws. Safe within one process only: separate processes writing one directory can lose updates, so use the SQLite adapter for that. The main entry stays free of I/O.
+
 ## 0.4.0
 
 ### Minor Changes

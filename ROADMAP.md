@@ -9,6 +9,9 @@
 - **0.3.0**: the `/browser` entry point with `localStorageAdapter()`.
 - **0.4.0**: the `/indexeddb` entry point with `indexedDbAdapter()` and the
   `/sqlite` entry point with `sqliteAdapter()`.
+- **0.5.0**: `sessionStorageAdapter()` in `/browser`, the `/file` entry point
+  with `fileAdapter()` (and `nodeFileSystem()` in `/file/node`), and the
+  `/json-file` entry point with `jsonFileAdapter()`.
 
 ## Ground rules for every new adapter
 
@@ -29,21 +32,17 @@
 
 ## Next
 
-1. **sessionStorage adapter**. Add `sessionStorageAdapter()` to `/browser`,
-   sharing the code and tests of `localStorageAdapter()`. Same envelope, so no
-   new subpath is needed. `subscribe` is a no-op because `storage` events do
-   not fire across tabs for session data.
-2. **Flat file adapter** (`/file`). One file per key inside a directory, with
-   keys encoded into safe file names. Writes go to a temp file and are renamed
-   into place. A per-key lock makes the revision check safe within one process.
-   Revision is stored beside the value. Takes a `FileSystemLike` interface, so
-   Node, Bun and Deno can each supply their own.
-3. **JSON file adapter** (`/json-file`). One JSON document holding every key:
-   `{ "<key>": { "r": "...", "v": "..." } }`. Atomic write by temp file and
-   rename. Loads once and caches, with an optional watch for outside edits.
-   Best for small config and settings data; the docs will say where to prefer
-   the flat file or SQLite adapters.
-4. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
+1. **YAML and INI file adapters** (`/yaml-file`, `/ini-file`). The same
+   single-document design as the JSON file adapter, for settings people edit by
+   hand. The document code is shared and takes a small `{ parse, stringify }`
+   codec, so the `yaml` and `ini` packages plug in and no parser is bundled.
+   Entries stay readable: `key: value` in YAML and `key = value` in INI, with
+   the revision worked out from the value instead of stored beside it, so an
+   edit made by hand is noticed as a new revision. INI is flat and string-only,
+   so a value it cannot hold on one line is refused with `invalid` rather than
+   mangled. The JSON file adapter shipped with the shared document engine these
+   build on, so each one is a codec plus an entry layout.
+2. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
    adapters over a minimal `query(sql, params)` interface, so `mysql2`, `pg`,
    `postgres` and similar clients all fit. Same `storage_entry` table as
    SQLite, using native `UUID` on Postgres and `CHAR(36)` on MySQL, with
@@ -55,7 +54,7 @@
 
 ## Eventually
 
-Cloud and server backends. They follow the six above and reuse the shared
+Cloud and server backends. They follow the adapters above and reuse the shared
 conformance suite.
 
 - **Redis adapter** (`/redis`). One Redis hash per key holding `r` (revision)

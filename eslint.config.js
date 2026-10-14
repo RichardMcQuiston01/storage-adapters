@@ -90,8 +90,17 @@ export default tseslint.config(
           name: 'localStorage',
           message: 'Persistence goes through a StorageAdapter.',
         },
+        {
+          name: 'sessionStorage',
+          message: 'Persistence goes through a StorageAdapter.',
+        },
       ],
     },
+  },
+  {
+    // The one file in src/ that may import a file system module.
+    files: ['src/file/node.ts'],
+    rules: { 'no-restricted-imports': 'off' },
   },
   {
     files: ['test/**/*.ts', '*.config.{js,ts}'],
