@@ -90,6 +90,10 @@ export default tseslint.config(
           name: 'localStorage',
           message: 'Persistence goes through a StorageAdapter.',
         },
+        {
+          name: 'sessionStorage',
+          message: 'Persistence goes through a StorageAdapter.',
+        },
       ],
     },
   },

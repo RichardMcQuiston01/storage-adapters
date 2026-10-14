@@ -77,6 +77,21 @@ changes made in other tabs. A full store is `quota`, blocked storage is
 `forbidden`, and nothing throws. Pass `storage` or `events` to use something
 other than the global `localStorage` and `window`.
 
+For data that should last only as long as the tab, such as a half-finished form,
+use `sessionStorageAdapter` from the same entry point. It stores the same
+revisioned envelope, takes the same options, and reports the same errors, naming
+`sessionStorage` instead of `localStorage`.
+
+```ts
+import { sessionStorageAdapter } from '@richardmcquiston01/storage-adapters/browser';
+
+const draft: StorageAdapter = sessionStorageAdapter();
+```
+
+Each tab has its own `sessionStorage`, so `subscribe` only hears about writes
+from other documents in the same tab, such as same-origin iframes. Both adapters
+ignore a change made to the other kind of storage under the same key.
+
 #### IndexedDB storage
 
 For values too large or too many for `localStorage`, use `indexedDbAdapter` from
@@ -165,7 +180,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, and `test/browser.test.ts` for the browser adapter `test/indexeddb.test.ts` for the IndexedDB adapter and `test/sqlite.test.ts` for the SQLite adapter.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter and `test/sqlite.test.ts` for the SQLite adapter.
 
 [Back to Top](#table-of-contents)
 
