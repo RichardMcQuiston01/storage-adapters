@@ -40,7 +40,17 @@
    rename. Loads once and caches, with an optional watch for outside edits.
    Best for small config and settings data; the docs will say where to prefer
    the flat file or SQLite adapters.
-3. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
+3. **YAML and INI file adapters** (`/yaml-file`, `/ini-file`). The same
+   single-document design as the JSON file adapter, for settings people edit by
+   hand. The document code is shared and takes a small `{ parse, stringify }`
+   codec, so the `yaml` and `ini` packages plug in and no parser is bundled.
+   Entries stay readable: `key: value` in YAML and `key = value` in INI, with
+   the revision worked out from the value instead of stored beside it, so an
+   edit made by hand is noticed as a new revision. INI is flat and string-only,
+   so a value it cannot hold on one line is refused with `invalid` rather than
+   mangled. The JSON file adapter is built first, with the codec seam, so these
+   two are thin wrappers.
+4. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
    adapters over a minimal `query(sql, params)` interface, so `mysql2`, `pg`,
    `postgres` and similar clients all fit. Same `storage_entry` table as
    SQLite, using native `UUID` on Postgres and `CHAR(36)` on MySQL, with
