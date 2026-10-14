@@ -1,0 +1,5 @@
+---
+'@richardmcquiston01/storage-adapters': minor
+---
+
+Add the optional `@richardmcquiston01/storage-adapters/file` entry point with `fileAdapter({ directory, fileSystem })`: a `StorageAdapter` that keeps one file per key in a directory. It imports no file system module; pass in a `FileSystemLike`, or use `nodeFileSystem()` from the new `@richardmcquiston01/storage-adapters/file/node` entry point (built on `node:fs/promises`, for Node, Bun and Deno). Keys are encoded into file names that are safe on every common file system, including case-insensitive ones, and cannot leave the directory. Writes go to a temporary file that is renamed into place, and writes to one key are queued, so `set` with `ifRevision` returns `conflict` when another write in the same process got there first. Maps a full disk to `quota`, permission errors to `forbidden`, a bad file to `corrupt`, an unusable key to `invalid` and anything else to `unavailable`, and never throws. Safe within one process only: separate processes writing one directory can lose updates, so use the SQLite adapter for that. The main entry stays free of I/O.

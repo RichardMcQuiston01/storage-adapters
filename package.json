@@ -70,6 +70,26 @@
         "default": "./dist/sqlite.cjs"
       }
     },
+    "./file": {
+      "import": {
+        "types": "./dist/file.d.ts",
+        "default": "./dist/file.js"
+      },
+      "require": {
+        "types": "./dist/file.d.cts",
+        "default": "./dist/file.cjs"
+      }
+    },
+    "./file/node": {
+      "import": {
+        "types": "./dist/file-node.d.ts",
+        "default": "./dist/file-node.js"
+      },
+      "require": {
+        "types": "./dist/file-node.d.cts",
+        "default": "./dist/file-node.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -82,6 +102,12 @@
       ],
       "sqlite": [
         "./dist/sqlite.d.ts"
+      ],
+      "file": [
+        "./dist/file.d.ts"
+      ],
+      "file/node": [
+        "./dist/file-node.d.ts"
       ]
     }
   },
