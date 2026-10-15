@@ -151,11 +151,12 @@ void describe('localStorageAdapter', () => {
     assert.equal(touched, false);
   });
 
-  void it('returns unavailable when there is no storage at all', async () => {
-    const adapter = localStorageAdapter();
-    const result = await adapter.get('a', { signal });
-    assert.ok(!result.ok && result.code === 'unavailable');
-  });
+  void it('returns unavailable when there is no storage at all', () =>
+    // Set to undefined, not just left alone: Deno has a localStorage of its own.
+    withGlobal('localStorage', { value: undefined }, async () => {
+      const result = await localStorageAdapter().get('a', { signal });
+      assert.ok(!result.ok && result.code === 'unavailable');
+    }));
 
   void it('subscribe reports changes to its key made in another tab', () => {
     const listeners = new Set<(event: StorageChangeEvent) => void>();
@@ -333,11 +334,13 @@ void describe('sessionStorageAdapter', () => {
   });
 
   void it('returns unavailable when there is no sessionStorage, even if localStorage exists', () =>
-    withGlobal('localStorage', { value: fakeStorage() }, async () => {
-      const result = await sessionStorageAdapter().get('a', { signal });
-      assert.ok(!result.ok && result.code === 'unavailable');
-      assert.match(result.error, /^sessionStorage is not available/);
-    }));
+    withGlobal('localStorage', { value: fakeStorage() }, () =>
+      withGlobal('sessionStorage', { value: undefined }, async () => {
+        const result = await sessionStorageAdapter().get('a', { signal });
+        assert.ok(!result.ok && result.code === 'unavailable');
+        assert.match(result.error, /^sessionStorage is not available/);
+      })
+    ));
 
   void it('uses the global sessionStorage when none is passed in', () => {
     const storage = fakeStorage();
