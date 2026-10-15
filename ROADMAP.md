@@ -57,13 +57,6 @@ conformance suite.
   reads as missing. Integration tests run only when a Redis URL is set in the
   environment.
 
-- **S3 and DigitalOcean Spaces adapter** (`/s3`). One object per key, over a
-  minimal `ObjectStoreLike` interface so the AWS SDK, a presigned-URL client or
-  any S3-compatible service fits. The object's ETag is the revision, and
-  `ifRevision` maps to an `If-Match` conditional write. Spaces may not honour
-  conditional writes, so the adapter checks for support and returns `invalid`
-  with a clear message instead of silently losing the conflict check.
-  `subscribe` is a no-op.
 - **Firebase adapter** (`/firebase`). Firestore first, with one document per
   key. A transaction makes the revision check atomic, and `onSnapshot` powers
   `subscribe`. The Realtime Database can follow if there is demand. The
@@ -71,6 +64,10 @@ conformance suite.
   consumer's job.
 
 ## Later
+
+- Try `s3Adapter` against more services (MinIO, Cloudflare R2, DigitalOcean
+  Spaces) and note which enforce `If-Match`. It was tested against Amazon S3's
+  documented behaviour through the `moto` emulator.
 
 - Listen for writes made by other processes on the server SQL adapters:
   `LISTEN`/`NOTIFY` for `postgresAdapter`. MySQL has no equivalent, so

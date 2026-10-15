@@ -1,6 +1,6 @@
 {
   "name": "@richardmcquiston01/storage-adapters",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value contract with typed errors and revisions, composable wrappers (prefix, fallback, retry, cache, encoding), and a generic persistence helper with conflict handling. No I/O in the core.",
   "keywords": [
     "typescript",
@@ -90,6 +90,16 @@
         "default": "./dist/mysql.cjs"
       }
     },
+    "./s3": {
+      "import": {
+        "types": "./dist/s3.d.ts",
+        "default": "./dist/s3.js"
+      },
+      "require": {
+        "types": "./dist/s3.d.cts",
+        "default": "./dist/s3.cjs"
+      }
+    },
     "./file": {
       "import": {
         "types": "./dist/file.d.ts",
@@ -159,6 +169,9 @@
       "mysql": [
         "./dist/mysql.d.ts"
       ],
+      "s3": [
+        "./dist/s3.d.ts"
+      ],
       "file": [
         "./dist/file.d.ts"
       ],
@@ -192,6 +205,7 @@
     "test": "bun test test",
     "test:deno": "deno test --allow-all --unstable-sloppy-imports --no-check test/",
     "smoke:dist": "bun scripts/smoke-dist.ts",
+    "check:s3": "bun scripts/check-s3.ts",
     "smoke:dist:deno": "deno run --allow-all --no-check scripts/smoke-dist.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -200,6 +214,7 @@
     "version-packages": "changeset version"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1152.0",
     "@changesets/cli": "^3.0.3",
     "@electric-sql/pglite": "^0.5.10",
     "@eslint/js": "^10.0.1",
