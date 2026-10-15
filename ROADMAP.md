@@ -15,6 +15,10 @@
 - **0.6.0**: the `/yaml-file` and `/ini-file` entry points with
   `yamlFileAdapter()` and `iniFileAdapter()`, and a fix for a stale cache in
   `jsonFileAdapter()` after a conflict.
+- **0.7.0**: the `/postgres` and `/mysql` entry points with `postgresAdapter()`
+  and `mysqlAdapter()`.
+- **0.8.0**: the `/s3` entry point with `s3Adapter()` (Amazon S3 and
+  S3-compatible services, including DigitalOcean Spaces).
 
 ## Ground rules for every new adapter
 
@@ -47,21 +51,18 @@
 Cloud and server backends. They follow the adapters above and reuse the shared
 conformance suite.
 
-- **Redis adapter** (`/redis`). One Redis hash per key holding `r` (revision)
-  and `v` (value), over a minimal `RedisLike` interface so `ioredis`, `redis`
-  and similar clients all fit. A short Lua script (or `WATCH`/`MULTI`) checks
-  the revision and writes in one step, so `ifRevision` conflicts are atomic
-  across processes. `subscribe` uses Pub/Sub on a channel per key prefix, so it
-  does not depend on server keyspace-notification settings. An optional
-  `ttlSeconds` option sets expiry for cache-style data, and an expired key
-  reads as missing. Integration tests run only when a Redis URL is set in the
-  environment.
-
 - **Firebase adapter** (`/firebase`). Firestore first, with one document per
   key. A transaction makes the revision check atomic, and `onSnapshot` powers
   `subscribe`. The Realtime Database can follow if there is demand. The
   Firebase SDK is an optional peer dependency, and security rules stay the
   consumer's job.
+
+- **Supabase adapter** (`/supabase`). Supabase is PostgreSQL, so the table and
+  atomic revision check from `postgresAdapter` carry over, reached through the
+  `supabase-js` client (PostgREST, or an RPC function for the conditional write)
+  instead of a direct connection. Realtime (`postgres_changes`) can power
+  `subscribe` for writes by other clients. Row-level security policies stay the
+  consumer's job. The `supabase-js` client is an optional peer dependency.
 
 ## Later
 
