@@ -56,3 +56,44 @@ jobs:
       - run: bun run test
       - run: bun run build
       - run: bun run smoke:dist
+
+  # The PostgreSQL and MySQL adapters, against real servers. The default test run
+  # skips these (it uses PGlite for PostgreSQL and has no MySQL), so this job sets
+  # the connection strings that switch them on.
+  databases:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: adapters
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: mysql
+          MYSQL_DATABASE: adapters
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pmysql"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/adapters
+      TEST_MYSQL_URL: mysql://root:mysql@127.0.0.1:3306/adapters
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun test test/databases.test.ts test/postgres.test.ts test/mysql.test.ts

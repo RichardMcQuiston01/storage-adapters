@@ -37,15 +37,10 @@
 
 ## Next
 
-1. **MySQL and Postgres adapters** (`/mysql`, `/postgres`). Server-side
-   adapters over a minimal `query(sql, params)` interface, so `mysql2`, `pg`,
-   `postgres` and similar clients all fit. Same `storage_entry` table as
-   SQLite, using native `UUID` on Postgres and `CHAR(36)` on MySQL, with
-   `created_at` and `updated_at` timestamps. Compare-and-set is a single
-   conditional `UPDATE`, or `INSERT ... ON CONFLICT` / `ON DUPLICATE KEY` for
-   first writes. `subscribe` uses `LISTEN/NOTIFY` on Postgres and is a no-op on
-   MySQL. Integration tests run against a real server only when a connection
-   string is set in the environment, so the default test run stays offline.
+1. **Chromium in CI.** Move the real-browser checks for localStorage,
+   sessionStorage and IndexedDB into the repository and run them in CI.
+2. **Cross-process locking for the file adapters.** An optional lock file so
+   several processes can share one directory or document safely.
 
 ## Eventually
 
@@ -76,6 +71,10 @@ conformance suite.
   consumer's job.
 
 ## Later
+
+- Listen for writes made by other processes on the server SQL adapters:
+  `LISTEN`/`NOTIFY` for `postgresAdapter`. MySQL has no equivalent, so
+  `mysqlAdapter` would need polling or an external channel.
 
 - Keep comments and layout when writing YAML, by editing the parsed document
   instead of rewriting it (the `yaml` package can do this). INI has no such option

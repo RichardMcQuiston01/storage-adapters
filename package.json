@@ -70,6 +70,26 @@
         "default": "./dist/sqlite.cjs"
       }
     },
+    "./postgres": {
+      "import": {
+        "types": "./dist/postgres.d.ts",
+        "default": "./dist/postgres.js"
+      },
+      "require": {
+        "types": "./dist/postgres.d.cts",
+        "default": "./dist/postgres.cjs"
+      }
+    },
+    "./mysql": {
+      "import": {
+        "types": "./dist/mysql.d.ts",
+        "default": "./dist/mysql.js"
+      },
+      "require": {
+        "types": "./dist/mysql.d.cts",
+        "default": "./dist/mysql.cjs"
+      }
+    },
     "./file": {
       "import": {
         "types": "./dist/file.d.ts",
@@ -133,6 +153,12 @@
       "sqlite": [
         "./dist/sqlite.d.ts"
       ],
+      "postgres": [
+        "./dist/postgres.d.ts"
+      ],
+      "mysql": [
+        "./dist/mysql.d.ts"
+      ],
       "file": [
         "./dist/file.d.ts"
       ],
@@ -175,12 +201,16 @@
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.3",
+    "@electric-sql/pglite": "^0.5.10",
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1",
     "eslint": "^10.12.0",
     "fake-indexeddb": "^6.2.5",
     "globals": "^17.13.0",
     "ini": "^7.0.0",
+    "mysql2": "^3.24.6",
+    "pg": "^8.23.1",
     "prettier": "^3.9.9",
     "tsup": "^8.5.1",
     "typescript": "~6.0.2",
