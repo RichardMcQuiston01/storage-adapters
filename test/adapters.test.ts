@@ -80,7 +80,7 @@ void describe('adapter wrappers', () => {
     const adapter = withFallback(down, secondary);
     const saved = await adapter.set('k', 'v', { signal });
     assert.ok(saved.ok);
-    const conflicted = withFallback(memoryAdapter(), secondary);
+    const conflicted = withFallback(memoryAdapter({ k: 'held' }), secondary);
     const result = await conflicted.set('k', 'v', { signal, ifRevision: '7' });
     assert.ok(!result.ok && result.code === 'conflict');
   });

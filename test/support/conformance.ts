@@ -234,6 +234,37 @@ export function runConformance(
         );
       });
 
+      test('creates a key that has nothing stored, even when given a revision', async ({
+        adapter,
+      }) => {
+        const created = expectOk(
+          await adapter.set('fresh', 'first', { signal, ifRevision: '1' })
+        );
+        assert.equal(created.value, 'first');
+        assert.equal(
+          expectOk(await adapter.get('fresh', { signal }))?.value,
+          'first'
+        );
+      });
+
+      test('creates a key again after it was removed, even with its old revision', async ({
+        adapter,
+      }) => {
+        assert.ok(
+          adapter.remove !== undefined,
+          'adapter should implement remove'
+        );
+        const first = expectOk(await adapter.set('gone', 'one', { signal }));
+        await adapter.remove('gone', { signal });
+        const again = expectOk(
+          await adapter.set('gone', 'two', {
+            signal,
+            ifRevision: revisionOf(first),
+          })
+        );
+        assert.equal(again.value, 'two');
+      });
+
       test('lets only one of several writers holding the same revision win', async ({
         adapter,
       }) => {

@@ -44,8 +44,10 @@ export interface StorageAdapter {
     options: { readonly signal: AbortSignal }
   ): Promise<StoreResult<StoredValue | null>>;
   /**
-   * With `ifRevision`, fail with `conflict` when the stored revision differs.
-   * Adapters without revisions ignore it (last write wins).
+   * With `ifRevision`, fail with `conflict` when a value is stored and its
+   * revision differs. A key with nothing stored has no revision to differ, so
+   * the write creates it. Adapters without revisions ignore `ifRevision` (last
+   * write wins).
    */
   set(
     key: string,
@@ -130,7 +132,8 @@ export function memoryAdapter(
       const current: StoredValue | undefined = entries.get(key);
       if (
         options.ifRevision !== undefined &&
-        (current?.revision ?? undefined) !== options.ifRevision
+        current !== undefined &&
+        current.revision !== options.ifRevision
       ) {
         return Promise.resolve(
           failure(
