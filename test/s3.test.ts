@@ -67,7 +67,69 @@ runConformance('s3Adapter with a prefix', {
   },
 });
 
+runConformance(
+  's3Adapter on a Spaces-like store (bare ETags, 412 for a missing object)',
+  {
+    ownWrites: 'notifies',
+    create: () => {
+      const store = fakeObjectStore('spaces');
+      return {
+        adapter: s3Adapter({ store }),
+        reopen: () => s3Adapter({ store }),
+      };
+    },
+  }
+);
+
 void describe('s3Adapter', () => {
+  void describe('a store that wants the ETag without quotes', () => {
+    void it('sends If-Match without quotes and detects conflicts', async () => {
+      const store = fakeObjectStore('spaces');
+      const adapter = s3Adapter({ store });
+      const first = expectOk(await adapter.set('k', 'v1', { signal }));
+      const second = expectOk(
+        await adapter.set('k', 'v2', {
+          signal,
+          ifRevision: first.revision ?? '',
+        })
+      );
+      assert.equal(store.objects.get('k'), 'v2');
+      const stale = expectFailure(
+        await adapter.set('k', 'v3', {
+          signal,
+          ifRevision: first.revision ?? '',
+        }),
+        'conflict',
+        'k'
+      );
+      assert.ok(stale.includes(second.revision ?? ''), stale);
+      assert.equal(store.objects.get('k'), 'v2');
+      const checked = store.calls.filter(
+        (call) => call.startsWith('put k if-match') && !call.includes('"')
+      );
+      assert.ok(checked.length >= 2, store.calls.join('\n'));
+    });
+
+    void it('creates an absent key even though the store answers 412 for it', async () => {
+      const store = fakeObjectStore('spaces');
+      const adapter = s3Adapter({ store });
+      expectOk(await adapter.set('new', 'v', { signal, ifRevision: '"abc"' }));
+      assert.equal(store.objects.get('new'), 'v');
+    });
+
+    void it('refuses a store that accepts any unquoted If-Match', async () => {
+      const store = fakeObjectStore('unquoted-accepts-any');
+      const adapter = s3Adapter({ store });
+      const message = expectFailure(
+        await adapter.set('k', 'v', { signal, ifRevision: '"abc"' }),
+        'invalid',
+        'k'
+      );
+      assert.match(message, /whatever its value/);
+      assert.equal(store.objects.has('k'), false);
+    });
+  });
+
   void it('stores each key as an object under the prefix, with the ETag as its revision', async () => {
     const store = fakeObjectStore();
     const adapter = s3Adapter({ store, prefix: 'app/' });
@@ -155,7 +217,10 @@ void describe('s3Adapter', () => {
         'k',
         'DigitalOcean Spaces'
       );
-      assert.match(message, /does not enforce conditional writes/);
+      assert.match(
+        message,
+        /ignores If-Match and If-None-Match|does not implement conditional writes/
+      );
       assert.match(message, /Write without ifRevision/);
       assert.equal(store.objects.has('k'), false, 'nothing may be written');
       assert.deepEqual([...store.objects.keys()], [], 'no probe object left');
@@ -171,6 +236,69 @@ void describe('s3Adapter', () => {
       assert.equal(probeKeys(store).length, probes);
     });
 
+    void it('refuses a revision check on a store that rejects an If-Match with the right ETag, and says why', async () => {
+      const store = fakeObjectStore('rejects-matching');
+      const adapter = s3Adapter({ store, name: 'DigitalOcean Spaces' });
+      const message = expectFailure(
+        await adapter.set('k', 'v', { signal, ifRevision: '"abc"' }),
+        'invalid',
+        'k',
+        'DigitalOcean Spaces'
+      );
+      assert.match(
+        message,
+        /refuses a write whose If-Match is the object's own ETag/
+      );
+      assert.match(message, /every revision check would fail/);
+      assert.equal(store.objects.has('k'), false, 'nothing may be written');
+      assert.deepEqual([...store.objects.keys()], [], 'no probe object left');
+    });
+
+    void it('still lets plain reads and writes through on such a store', async () => {
+      const store = fakeObjectStore('rejects-matching');
+      const adapter = s3Adapter({ store });
+      const written = expectOk(await adapter.set('k', 'v', { signal }));
+      assert.deepEqual(await adapter.get('k', { signal }), {
+        ok: true,
+        value: written,
+      });
+      await adapter.set('k', 'w', {
+        signal,
+        ifRevision: written.revision ?? '',
+      });
+      assert.equal(
+        store.objects.get('k'),
+        'v',
+        'the checked write must not go through'
+      );
+    });
+
+    void it("accepts the probe object's own ETag on a store that handles conditions correctly", async () => {
+      const store = fakeObjectStore();
+      await s3Adapter({ store }).set('k', 'v', { signal, ifRevision: 'x' });
+      assert.ok(
+        store.calls.some((call) =>
+          /put .*\.storage-adapters-probe-.* if-match "[0-9a-f]{32}"/.test(call)
+        ),
+        store.calls.join('\n')
+      );
+    });
+
+    void it('treats a store that returns no ETag from the probe as unusable for revisions', async () => {
+      const store = fakeObjectStore();
+      const realPut = store.putObject.bind(store);
+      store.putObject = async (key, body, options) => {
+        const result = await realPut(key, body, options);
+        return key.includes('.storage-adapters-probe-') ? { etag: '' } : result;
+      };
+      const message = expectFailure(
+        await s3Adapter({ store }).set('k', 'v', { signal, ifRevision: 'x' }),
+        'invalid',
+        'k'
+      );
+      assert.match(message, /returned no ETag/);
+    });
+
     void it('refuses a revision check on a store that answers 501 Not Implemented', async () => {
       const store = fakeObjectStore('not-implemented');
       const message = expectFailure(
@@ -178,7 +306,10 @@ void describe('s3Adapter', () => {
         'invalid',
         'k'
       );
-      assert.match(message, /does not enforce conditional writes/);
+      assert.match(
+        message,
+        /ignores If-Match and If-None-Match|does not implement conditional writes/
+      );
     });
 
     void it('does not remember a check that could not be made, so the next write checks again', async () => {

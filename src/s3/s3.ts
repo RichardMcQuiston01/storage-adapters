@@ -61,11 +61,15 @@ export interface S3AdapterOptions {
   /** Names the store in messages, for example `"DigitalOcean Spaces"`. Defaults to `"S3"`. */
   readonly name?: string;
   /**
-   * Before the first write that uses `ifRevision`, check once that the store really
-   * enforces `If-Match` and `If-None-Match` (a few extra requests on a throwaway
-   * object). A store that ignores them would silently lose the conflict check, so
-   * such a write is refused with `invalid` instead. Set `false` if you know your
-   * store enforces them, as Amazon S3 does. Defaults to `true`.
+   * Before the first write that uses `ifRevision`, check once that the store handles
+   * `If-Match` and `If-None-Match` correctly (a few extra requests on a throwaway
+   * object): it must refuse a second create and a wrong ETag, and accept an object's
+   * own ETag (with its quotes, or, as DigitalOcean Spaces wants, without them: the
+   * check finds out which and the adapter uses it). A store that ignores the headers
+   * would silently lose the conflict check, and one that refuses a matching ETag
+   * would fail every check, so such a write is refused with `invalid` and a message
+   * saying which. Set `false` if you know your store handles them with the ETag as
+   * it returns it, as Amazon S3 does. Defaults to `true`.
    */
   readonly verifyConditionalWrites?: boolean;
 }
@@ -192,6 +196,25 @@ function keyProblem(objectKey: string): string | undefined {
   return undefined;
 }
 
+/** How a store handles conditional writes, found by the one-time check. */
+interface ConditionalSupport {
+  /** Why the store cannot be used for revision checks, or `null` if it can. */
+  readonly problem: string | null;
+  /** The store wants the ETag in `If-Match` without its quotes (DigitalOcean Spaces). */
+  readonly unquoteMatch: boolean;
+}
+
+const WORKS: ConditionalSupport = { problem: null, unquoteMatch: false };
+const unusable = (problem: string): ConditionalSupport => ({
+  problem,
+  unquoteMatch: false,
+});
+
+/** An ETag without its surrounding double quotes: `"abc"` becomes `abc`. */
+function withoutQuotes(etag: string): string {
+  return etag.replace(/^"(.*)"$/, '$1');
+}
+
 /**
  * A `StorageAdapter` over an S3-compatible bucket. Each key is an object and its
  * ETag is the revision, so a value written again unchanged keeps its revision. `set`
@@ -208,52 +231,96 @@ export function s3Adapter(options: S3AdapterOptions): StorageAdapter {
   const label: string = options.name ?? DEFAULT_NAME;
   const verify: boolean = options.verifyConditionalWrites ?? true;
   const listeners = createChangeListeners();
-  let support: Promise<boolean> | null = verify ? null : Promise.resolve(true);
+  let support: Promise<ConditionalSupport> | null = verify
+    ? null
+    : Promise.resolve(WORKS);
 
   const objectKeyOf = (key: string): string => `${prefix}${key}`;
 
   /**
-   * Checks once that conditional writes are enforced, on a throwaway object: a create
-   * that must succeed, a second create that must fail, and a write with the wrong
-   * ETag that must fail. Resolves false if any of them is let through or refused as
-   * not implemented. A failure to find out (no permission, network) is thrown and
-   * not remembered, so the next write checks again.
+   * Checks once that the store handles conditional writes correctly, on a throwaway
+   * object: a create that must succeed, a second create and a write with the wrong
+   * ETag that must be refused, and a write with the object's own ETag that must be
+   * accepted, with its quotes or, failing that, without them (and then a wrong ETag
+   * without quotes must still be refused). Resolves what it found. A failure to find
+   * out (no permission, network) is thrown and not remembered, so the next write
+   * checks again.
    */
-  const conditionalWritesWork = (signal: AbortSignal): Promise<boolean> => {
+  const conditionalWritesSupport = (
+    signal: AbortSignal
+  ): Promise<ConditionalSupport> => {
     if (support === null) {
       const probeKey = `${prefix}.storage-adapters-probe-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-      const run = async (): Promise<boolean> => {
+      const notImplemented = unusable(
+        'does not implement conditional writes (If-Match)'
+      );
+      /** True if the store let the write through, false if it refused the condition. */
+      const accepts = async (condition: {
+        readonly ifMatch?: string;
+        readonly ifNoneMatch?: '*';
+      }): Promise<boolean> => {
+        try {
+          await store.putObject(probeKey, 'probe', { signal, ...condition });
+          return true;
+        } catch (error: unknown) {
+          if (isFailedCondition(error)) {
+            return false;
+          }
+          throw error;
+        }
+      };
+      const run = async (): Promise<ConditionalSupport> => {
         let created = false;
         try {
+          let etag: string;
           try {
-            await store.putObject(probeKey, '', { signal, ifNoneMatch: '*' });
+            etag = (
+              await store.putObject(probeKey, 'probe', {
+                signal,
+                ifNoneMatch: '*',
+              })
+            ).etag;
             created = true;
           } catch (error: unknown) {
             if (isNotImplemented(error) || statusOf(error) === 400) {
-              return false;
+              return notImplemented;
             }
             throw error;
           }
-          for (const condition of [
-            { ifNoneMatch: '*' as const },
-            { ifMatch: '"storage-adapters-probe"' },
-          ]) {
-            try {
-              await store.putObject(probeKey, 'probe', {
-                signal,
-                ...condition,
-              });
-              return false; // The condition was ignored.
-            } catch (error: unknown) {
-              if (isNotImplemented(error)) {
-                return false;
-              }
-              if (!isFailedCondition(error)) {
-                throw error;
-              }
-            }
+          if (etag === '') {
+            return unusable('returned no ETag to use as a revision');
           }
-          return true;
+          try {
+            if (
+              (await accepts({ ifNoneMatch: '*' })) ||
+              (await accepts({ ifMatch: '"storage-adapters-probe"' }))
+            ) {
+              return unusable(
+                'ignores If-Match and If-None-Match, so a revision check would be silently skipped'
+              );
+            }
+            if (await accepts({ ifMatch: etag })) {
+              return WORKS;
+            }
+            // Some stores (DigitalOcean Spaces) want the ETag without its quotes.
+            const bare: string = withoutQuotes(etag);
+            if (bare !== etag && (await accepts({ ifMatch: bare }))) {
+              if (await accepts({ ifMatch: 'storage-adapters-probe' })) {
+                return unusable(
+                  'accepts an If-Match without quotes whatever its value, so a revision check would be unreliable'
+                );
+              }
+              return { problem: null, unquoteMatch: true };
+            }
+            return unusable(
+              "refuses a write whose If-Match is the object's own ETag, with or without quotes, so every revision check would fail"
+            );
+          } catch (error: unknown) {
+            if (isNotImplemented(error)) {
+              return notImplemented;
+            }
+            throw error;
+          }
         } finally {
           if (created) {
             try {
@@ -368,52 +435,62 @@ export function s3Adapter(options: S3AdapterOptions): StorageAdapter {
           const written = await store.putObject(objectKey, value, { signal });
           return stored(key, value, written.etag);
         }
-        if (!(await conditionalWritesWork(signal))) {
+        const { problem, unquoteMatch } =
+          await conditionalWritesSupport(signal);
+        if (problem !== null) {
           return sqlFailure(
             label,
             'invalid',
             key,
-            `cannot check revision ${ifRevision}: ${label} does not enforce conditional writes (If-Match), so the check would be silently skipped. Write without ifRevision (last write wins), or set verifyConditionalWrites to false if you know it does`
+            `cannot check revision ${ifRevision}: ${label} ${problem}. Write without ifRevision (last write wins), or set verifyConditionalWrites to false if you know it works`
           );
         }
+        const ifMatch: string = unquoteMatch
+          ? withoutQuotes(ifRevision)
+          : ifRevision;
         for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
+          let absent = false;
           try {
             const written = await store.putObject(objectKey, value, {
               signal,
-              ifMatch: ifRevision,
+              ifMatch,
             });
             return stored(key, value, written.etag);
           } catch (error: unknown) {
             if (isMissingObject(error)) {
-              // Nothing is stored, so the key is created: only if still absent.
-              try {
-                const created = await store.putObject(objectKey, value, {
-                  signal,
-                  ifNoneMatch: '*',
-                });
-                return stored(key, value, created.etag);
-              } catch (createError: unknown) {
-                if (!isFailedCondition(createError)) {
-                  throw createError;
-                }
-                // Someone created it first: compare again.
-              }
+              absent = true;
             } else if (!isFailedCondition(error)) {
               throw error;
             }
           }
-          const current = await currentRevision(objectKey, signal);
-          if (current !== null) {
-            return sqlFailure(
-              label,
-              'conflict',
-              key,
-              current === undefined
-                ? `changed since revision ${ifRevision} was read`
-                : `holds revision ${current}, but revision ${ifRevision} was expected`
-            );
+          if (!absent) {
+            // Amazon S3 says 404 for an If-Match on a missing object; some stores (DigitalOcean
+            // Spaces) say 412, the same as a wrong ETag, so look at what is there.
+            const current = await currentRevision(objectKey, signal);
+            if (current !== null) {
+              return sqlFailure(
+                label,
+                'conflict',
+                key,
+                current === undefined
+                  ? `changed since revision ${ifRevision} was read`
+                  : `holds revision ${current}, but revision ${ifRevision} was expected`
+              );
+            }
           }
-          // The object was removed in between, so write again as new.
+          // Nothing is stored, so the key is created: only if still absent.
+          try {
+            const created = await store.putObject(objectKey, value, {
+              signal,
+              ifNoneMatch: '*',
+            });
+            return stored(key, value, created.etag);
+          } catch (createError: unknown) {
+            if (!isFailedCondition(createError)) {
+              throw createError;
+            }
+            // Someone created it first: compare again.
+          }
         }
         return sqlFailure(
           label,
