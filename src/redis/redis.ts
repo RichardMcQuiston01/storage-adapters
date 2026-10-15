@@ -62,11 +62,18 @@ export interface RedisAdapterOptions {
   readonly subscriber?: RedisSubscriberLike;
   /** Called when the subscriber connection fails to start or stop listening. */
   readonly onSubscriberError?: (message: string) => void;
+  /**
+   * Milliseconds to wait before trying again when the subscriber fails to start
+   * listening, for as long as someone is subscribed. Defaults to 5000; `0` never
+   * retries.
+   */
+  readonly subscriberRetryMs?: number;
 }
 
 const LABEL = 'Redis';
 const DEFAULT_PREFIX = 'storage:';
 const CHANGES_CHANNEL = 'changes';
+const DEFAULT_RETRY_MS = 5000;
 
 /*
  * Each key is one hash: `r` holds the revision (a counter from 1) and `v` the value.
@@ -76,6 +83,11 @@ const CHANGES_CHANNEL = 'changes';
  * KEYS[1] hash key; ARGV: 1 value, 2 "1" if a revision is to be checked, 3 that
  * revision, 4 ttl seconds ("0" for none), 5 channel, 6 origin, 7 caller's key.
  * Replies {1, revision} when written and {0, revision} on a conflict.
+ *
+ * The change notice carries only the origin and the key, never the value: anyone
+ * who can subscribe to the channel could otherwise read values they cannot HGET, and
+ * anyone who can publish on it could otherwise forge a value. A listener reads the
+ * hash itself, so what it reports is what Redis holds.
  */
 const SET_SCRIPT = `local current = redis.call('HGET', KEYS[1], 'r')
 if ARGV[2] == '1' and current and current ~= ARGV[3] then
@@ -86,12 +98,12 @@ redis.call('HSET', KEYS[1], 'v', ARGV[1])
 if tonumber(ARGV[4]) > 0 then
   redis.call('EXPIRE', KEYS[1], ARGV[4])
 end
-redis.call('PUBLISH', ARGV[5], cjson.encode({o = ARGV[6], k = ARGV[7], r = revision, v = ARGV[1]}))
+redis.call('PUBLISH', ARGV[5], cjson.encode({o = ARGV[6], k = ARGV[7]}))
 return {1, revision}`;
 
 /** KEYS[1] hash key; ARGV: 1 channel, 2 origin, 3 caller's key. */
 const REMOVE_SCRIPT = `redis.call('DEL', KEYS[1])
-redis.call('PUBLISH', ARGV[1], cjson.encode({o = ARGV[2], k = ARGV[3], v = cjson.null}))
+redis.call('PUBLISH', ARGV[1], cjson.encode({o = ARGV[2], k = ARGV[3]}))
 return 1`;
 
 /** Maps a Redis error reply (or a connection error) to a code. */
@@ -131,10 +143,8 @@ function newOrigin(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
-/** What a change notice from another process holds, or null if it is not one. */
-function parseChange(
-  message: string
-): { key: string; stored: StoredValue | null } | null {
+/** Which key a change notice names and who sent it, or null if it is not one. */
+function parseChange(message: string): { key: string; origin: string } | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(message);
@@ -148,13 +158,10 @@ function parseChange(
   if (typeof change.k !== 'string') {
     return null;
   }
-  if (change.v === null) {
-    return { key: change.k, stored: null };
-  }
-  if (typeof change.v === 'string' && typeof change.r === 'string') {
-    return { key: change.k, stored: { value: change.v, revision: change.r } };
-  }
-  return null;
+  return {
+    key: change.k,
+    origin: typeof change.o === 'string' ? change.o : '',
+  };
 }
 
 /**
@@ -207,45 +214,121 @@ export function redisAdapter(options: RedisAdapterOptions): StorageAdapter {
     }
   };
 
+  /** Reads what Redis holds for a key. */
+  const readKey = async (
+    key: string
+  ): Promise<StoreResult<StoredValue | null>> => {
+    try {
+      const reply: unknown = await client.command([
+        'HMGET',
+        redisKey(key),
+        'r',
+        'v',
+      ]);
+      const [revisionField, valueField]: unknown[] = Array.isArray(reply)
+        ? (reply as unknown[])
+        : [];
+      if (revisionField === null && valueField === null) {
+        return { ok: true, value: null };
+      }
+      const revision: string | undefined = revisionText(revisionField);
+      if (typeof valueField !== 'string' || revision === undefined) {
+        return sqlFailure(
+          LABEL,
+          'corrupt',
+          key,
+          'holds a hash that is not a stored entry'
+        );
+      }
+      return { ok: true, value: { value: valueField, revision } };
+    } catch (error: unknown) {
+      return failedWith(error, key, 'read');
+    }
+  };
+
+  /** Which listening is current, so a stopped one that is slow to end stays quiet. */
+  let listeningToken = 0;
+  /** Per key, how many notices have been read and which was reported last. */
+  const reads = new Map<string, { latest: number; reported: number }>();
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const retryMs: number = options.subscriberRetryMs ?? DEFAULT_RETRY_MS;
+
+  /** A notice names a key; what is reported is what Redis holds for it now. */
+  const announce = (key: string): void => {
+    if (!listeners.has(key)) {
+      return;
+    }
+    const progress = reads.get(key) ?? { latest: 0, reported: 0 };
+    reads.set(key, progress);
+    progress.latest += 1;
+    const order: number = progress.latest;
+    void readKey(key).then((read) => {
+      if (!read.ok || order < progress.reported) {
+        return; // Unreadable, or a newer read has already been reported.
+      }
+      progress.reported = order;
+      listeners.notify(key, read.value);
+    });
+  };
+
   const startListening = (): void => {
     if (subscriber === undefined || stopListening !== null) {
       return;
     }
+    listeningToken += 1;
+    const token: number = listeningToken;
     const started: Promise<() => void | Promise<void>> = subscriber.subscribe(
       channel,
       (message) => {
         const change = parseChange(message);
         // Our own writes were already announced when they finished.
-        if (change === null || isOwn(message)) {
+        if (
+          change === null ||
+          change.origin === origin ||
+          token !== listeningToken
+        ) {
           return;
         }
-        listeners.notify(change.key, change.stored);
+        announce(change.key);
       }
     );
     stopListening = started;
     started.catch((error: unknown) => {
-      stopListening = null;
+      if (stopListening === started) {
+        stopListening = null;
+      }
       reportSubscriberError('listen to', error);
+      scheduleRetry();
     });
   };
 
-  const isOwn = (message: string): boolean => {
-    try {
-      const parsed: unknown = JSON.parse(message);
-      return (
-        typeof parsed === 'object' &&
-        parsed !== null &&
-        (parsed as { o?: unknown }).o === origin
-      );
-    } catch {
-      return false;
+  /** Tries to start listening again while someone is still subscribed. */
+  const scheduleRetry = (): void => {
+    if (retryMs <= 0 || listenerCount === 0 || retryTimer !== null) {
+      return;
     }
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (listenerCount > 0) {
+        startListening();
+      }
+    }, retryMs);
+    // A pending retry alone should not keep a Node-style process running.
+    (retryTimer as { unref?: () => void }).unref?.();
   };
 
   const stopListeningIfIdle = (): void => {
-    if (listenerCount > 0 || stopListening === null) {
+    if (listenerCount > 0) {
       return;
     }
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    if (stopListening === null) {
+      return;
+    }
+    listeningToken += 1;
     const stopping: Promise<() => void | Promise<void>> = stopListening;
     stopListening = null;
     stopping
@@ -261,32 +344,7 @@ export function redisAdapter(options: RedisAdapterOptions): StorageAdapter {
       if (refused !== null) {
         return refused;
       }
-      try {
-        const reply: unknown = await client.command([
-          'HMGET',
-          redisKey(key),
-          'r',
-          'v',
-        ]);
-        const [revisionField, valueField]: unknown[] = Array.isArray(reply)
-          ? (reply as unknown[])
-          : [];
-        if (revisionField === null && valueField === null) {
-          return { ok: true, value: null };
-        }
-        const revision: string | undefined = revisionText(revisionField);
-        if (typeof valueField !== 'string' || revision === undefined) {
-          return sqlFailure(
-            LABEL,
-            'corrupt',
-            key,
-            'holds a hash that is not a stored entry'
-          );
-        }
-        return { ok: true, value: { value: valueField, revision } };
-      } catch (error: unknown) {
-        return failedWith(error, key, 'read');
-      }
+      return readKey(key);
     },
 
     async set(key, value, { signal, ifRevision }) {

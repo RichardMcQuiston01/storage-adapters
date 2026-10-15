@@ -4,7 +4,13 @@
  * of I/O, and this file imports no file system module. You pass in a
  * `FileSystemLike`; `nodeFileSystem()` from `/file/node` covers Node, Bun and Deno.
  */
-import { errorCodeOf, failedWithFor, failureFor, withLock } from './shared.js';
+import {
+  errorCodeOf,
+  failedWithFor,
+  failureFor,
+  withLock,
+  writeTemporaryFile,
+} from './shared.js';
 import type {
   StorageAdapter,
   StoredValue,
@@ -21,6 +27,14 @@ export interface FileSystemLike {
   readFile(path: string): Promise<string>;
   /** Writes the text, replacing the file if it exists. */
   writeFile(path: string, data: string): Promise<void>;
+  /**
+   * Optional. Creates a new file with the text, and rejects with code `"EEXIST"`
+   * instead of writing when anything is already at `path`, a symbolic link included
+   * (`O_CREAT | O_EXCL`). The adapters write their temporary files this way when it
+   * is available, so a file or link someone else put at the guessed name is never
+   * written through or deleted.
+   */
+  writeNewFile?(path: string, data: string): Promise<void>;
   /** Moves a file, replacing the destination in one step. */
   rename(fromPath: string, toPath: string): Promise<void>;
   /** Deletes a file. A file that is already gone is not an error. */
@@ -164,7 +178,6 @@ export function fileAdapter(options: FileAdapterOptions): StorageAdapter {
     Set<(stored: StoredValue | null) => void>
   >();
   let directoryReady = false;
-  let tempCounter = 0;
 
   const pathOf = (stem: string): string =>
     `${directory}/${stem}${FILE_EXTENSION}`;
@@ -274,10 +287,12 @@ export function fileAdapter(options: FileAdapterOptions): StorageAdapter {
               );
             }
             const revision: string = String((Number(existing?.r) || 0) + 1);
-            tempCounter += 1;
-            temporaryPath = `${path}.${Math.random().toString(36).slice(2)}${tempCounter}.tmp`;
             const envelope: Envelope = { r: revision, v: value };
-            await fileSystem.writeFile(temporaryPath, JSON.stringify(envelope));
+            temporaryPath = await writeTemporaryFile(
+              fileSystem,
+              path,
+              JSON.stringify(envelope)
+            );
             await fileSystem.rename(temporaryPath, path);
             temporaryPath = null;
             return { ok: true, value: { value, revision } };
