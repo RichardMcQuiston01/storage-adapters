@@ -205,6 +205,7 @@
     "test": "bun test test",
     "test:deno": "deno test --allow-all --unstable-sloppy-imports --no-check test/",
     "smoke:dist": "bun scripts/smoke-dist.ts",
+    "check:s3": "bun scripts/check-s3.ts",
     "smoke:dist:deno": "deno run --allow-all --no-check scripts/smoke-dist.ts",
     "lint": "eslint .",
     "format": "prettier --write .",

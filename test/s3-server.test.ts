@@ -72,17 +72,18 @@ if (endpoint === undefined || endpoint === '') {
     }
   }
 
-  // Make sure the bucket is there before the first test.
+  // Use the bucket if it is there; create it only if it is missing. Creating an
+  // existing bucket can be refused (restricted keys), which must not stop the tests.
   await client
-    .send(new sdk.CreateBucketCommand({ Bucket: bucket }))
-    .catch((error: unknown) => {
-      const name: string = (error as { name?: string }).name ?? '';
-      if (
-        name !== 'BucketAlreadyOwnedByYou' &&
-        name !== 'BucketAlreadyExists'
-      ) {
+    .send(new sdk.HeadBucketCommand({ Bucket: bucket }))
+    .catch(async (error: unknown) => {
+      const status: number | undefined = (
+        error as { $metadata?: { httpStatusCode?: number } }
+      ).$metadata?.httpStatusCode;
+      if (status !== 404) {
         throw error;
       }
+      await client.send(new sdk.CreateBucketCommand({ Bucket: bucket }));
     });
 
   runConformance('s3Adapter on an S3-compatible server', {

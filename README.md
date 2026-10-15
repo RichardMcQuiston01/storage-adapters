@@ -236,6 +236,18 @@ storage quota is `quota`, throttling and network errors are `unavailable`, and
 nothing throws. `subscribe` reports changes made through the same adapter; it does
 not listen for writes made by other processes.
 
+To see how a particular service behaves before you rely on it, run the check from a
+clone of this repository. It tries each conditional write step by step against your
+bucket, runs the adapter, prints whether the service enforces conditions, and deletes
+everything it wrote. Credentials come from the environment and are never printed.
+
+```sh
+TEST_S3_ENDPOINT=https://nyc3.digitaloceanspaces.com \
+TEST_S3_BUCKET=my-space \
+TEST_S3_ACCESS_KEY_ID=... TEST_S3_SECRET_ACCESS_KEY=... \
+bun run check:s3
+```
+
 To use another client, give `s3Adapter` your own `ObjectStoreLike`: `getObject`,
 `putObject` (with optional `ifMatch` and `ifNoneMatch`) and `deleteObject`.
 
@@ -443,7 +455,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT` to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 
