@@ -189,6 +189,56 @@ compared exactly (case and trailing spaces count) and can be up to 1024 bytes of
 UTF-8; a longer key is `invalid`. `subscribe` reports changes made through the same
 adapter; it does not listen for writes made by other processes.
 
+#### S3 and DigitalOcean Spaces storage
+
+To keep values in a bucket, use `s3Adapter` from the optional `/s3` entry point. It
+works with Amazon S3 and with S3-compatible services such as DigitalOcean Spaces,
+MinIO and Cloudflare R2. It imports no SDK: `awsSdkObjectStore` wraps a client from
+the AWS SDK for JavaScript v3, and you pass in the client and the three command
+classes it uses.
+
+```ts
+import * as sdk from '@aws-sdk/client-s3';
+import {
+  awsSdkObjectStore,
+  s3Adapter,
+} from '@richardmcquiston01/storage-adapters/s3';
+
+const client = new sdk.S3Client({
+  region: 'us-east-1',
+  // For Spaces, MinIO and the like, name the service:
+  // endpoint: 'https://nyc3.digitaloceanspaces.com',
+});
+
+const adapter: StorageAdapter = s3Adapter({
+  store: awsSdkObjectStore({ client, bucket: 'my-bucket', commands: sdk }),
+  prefix: 'settings/',
+  name: 'Amazon S3', // used in error messages
+});
+```
+
+Each key is one object, `prefix` plus the key, and its ETag is the revision. S3 makes
+the ETag from the content, so a value written again unchanged keeps its revision.
+`set` with `ifRevision` is a conditional write (`If-Match`), so two writers holding
+the same revision cannot both win: one gets `conflict`. A key with nothing stored is
+created with `If-None-Match: *`, so a race to create it has one winner too. Keys can
+be up to 1024 bytes of UTF-8 including the prefix, and a key with a `.` or `..` path
+segment is `invalid`, because URL handling would turn it into a different key.
+
+Some S3-compatible services ignore `If-Match` and would silently lose the conflict
+check. Before the first write that uses `ifRevision`, the adapter checks once, on a
+throwaway object under the prefix (three conditional writes and a delete), that the
+store really refuses a second create and a write with the wrong ETag. If it does not,
+that write is refused with `invalid` and a message saying so, and plain writes keep
+working. Amazon S3 enforces conditions; set `verifyConditionalWrites: false` to skip
+the check if you know your service does too. A permission error is `forbidden`, a
+storage quota is `quota`, throttling and network errors are `unavailable`, and
+nothing throws. `subscribe` reports changes made through the same adapter; it does
+not listen for writes made by other processes.
+
+To use another client, give `s3Adapter` your own `ObjectStoreLike`: `getObject`,
+`putObject` (with optional `ifMatch` and `ifNoneMatch`) and `deleteObject`.
+
 #### File storage
 
 For small servers, scripts and tools that want plain files, use `fileAdapter` from
@@ -285,6 +335,7 @@ Choose by how much data you have and who writes it:
 | `fileAdapter` | Many or large values | One process per directory |
 | `sqliteAdapter` | Several processes writing | Needs a SQLite driver |
 | `postgresAdapter`, `mysqlAdapter` | Several servers sharing one database | Needs a driver and a running server |
+| `s3Adapter` | Values shared by many servers, no database to run | One or more requests per call; `ifRevision` needs a store that enforces conditional writes |
 
 #### YAML and INI file storage
 
@@ -392,7 +443,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT` to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 

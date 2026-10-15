@@ -90,6 +90,16 @@
         "default": "./dist/mysql.cjs"
       }
     },
+    "./s3": {
+      "import": {
+        "types": "./dist/s3.d.ts",
+        "default": "./dist/s3.js"
+      },
+      "require": {
+        "types": "./dist/s3.d.cts",
+        "default": "./dist/s3.cjs"
+      }
+    },
     "./file": {
       "import": {
         "types": "./dist/file.d.ts",
@@ -159,6 +169,9 @@
       "mysql": [
         "./dist/mysql.d.ts"
       ],
+      "s3": [
+        "./dist/s3.d.ts"
+      ],
       "file": [
         "./dist/file.d.ts"
       ],
@@ -200,6 +213,7 @@
     "version-packages": "changeset version"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1152.0",
     "@changesets/cli": "^3.0.3",
     "@electric-sql/pglite": "^0.5.10",
     "@eslint/js": "^10.0.1",
