@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.7.0
+
+### Minor Changes
+
+- b7c4270: Add PostgreSQL and MySQL adapters as optional entry points. `postgresAdapter()` from `/postgres` takes any client with `query(sql, parameters)` that resolves `{ rows }` (`pg`, PGlite), and `mysqlAdapter()` from `/mysql` takes a `mysql2/promise` pool or connection. Both keep a `storage_entry` table (a `table` option names another) with a UUID id, the value, a counter revision and `created_at`/`updated_at`, create it on first use, and make the `ifRevision` check atomic, so two connections racing with the same revision cannot both win. Neither bundles a driver. `subscribe` reports changes made through the same adapter.
+
+### Patch Changes
+
+- 765c85a: `memoryAdapter()` now honours an aborted signal like every other adapter: `get`, `set` and `remove` return an `unavailable` result that names the key, and leave the stored data untouched. Before, they ignored the signal.
+- 31e58fd: `memoryAdapter()` now creates a key that has nothing stored when `set` is given `ifRevision`, like every other adapter. Before, it returned `conflict`. The `StorageAdapter.set` documentation now states the rule: `conflict` only when a value is stored and its revision differs.
+
 ## 0.6.0
 
 ### Minor Changes
