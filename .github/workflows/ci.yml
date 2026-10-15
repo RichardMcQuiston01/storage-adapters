@@ -26,3 +26,33 @@ jobs:
       - run: bun run format:check
       - run: bun run test
       - run: bun run build
+
+  # The library claims to run on Node, Bun and Deno, and on Windows paths. These
+  # jobs are separate from `check` so a platform problem is easy to tell apart
+  # from a lint or type error.
+  deno:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun run test:deno
+      - run: bun run smoke:dist:deno
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+      - run: bun run build
+      - run: bun run smoke:dist
