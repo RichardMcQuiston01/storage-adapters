@@ -8,6 +8,8 @@ export default defineConfig({
     browser: 'src/browser/index.ts',
     indexeddb: 'src/indexeddb/index.ts',
     sqlite: 'src/sqlite/index.ts',
+    postgres: 'src/postgres/index.ts',
+    mysql: 'src/mysql/index.ts',
     file: 'src/file/index.ts',
     'file-node': 'src/file/node.ts',
     'json-file': 'src/json-file/index.ts',

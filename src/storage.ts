@@ -44,8 +44,10 @@ export interface StorageAdapter {
     options: { readonly signal: AbortSignal }
   ): Promise<StoreResult<StoredValue | null>>;
   /**
-   * With `ifRevision`, fail with `conflict` when the stored revision differs.
-   * Adapters without revisions ignore it (last write wins).
+   * With `ifRevision`, fail with `conflict` when a value is stored and its
+   * revision differs. A key with nothing stored has no revision to differ, so
+   * the write creates it. Adapters without revisions ignore `ifRevision` (last
+   * write wins).
    */
   set(
     key: string,
@@ -105,14 +107,33 @@ export function memoryAdapter(
   const notify = (key: string, stored: StoredValue | null): void => {
     for (const listener of listeners.get(key) ?? []) listener(stored);
   };
+  const stopped = <T>(
+    key: string,
+    action: string,
+    signal: AbortSignal
+  ): Promise<StoreResult<T>> | null =>
+    signal.aborted
+      ? Promise.resolve(
+          failure(
+            'unavailable',
+            `Could not ${action} "${key}": request was aborted.`
+          )
+        )
+      : null;
   return {
-    get: (key) =>
+    get: (key, options) =>
+      stopped<StoredValue | null>(key, 'read', options.signal) ??
       Promise.resolve({ ok: true, value: entries.get(key) ?? null }),
     set: (key, value, options) => {
+      const aborted = stopped<StoredValue>(key, 'save', options.signal);
+      if (aborted !== null) {
+        return aborted;
+      }
       const current: StoredValue | undefined = entries.get(key);
       if (
         options.ifRevision !== undefined &&
-        (current?.revision ?? undefined) !== options.ifRevision
+        current !== undefined &&
+        current.revision !== options.ifRevision
       ) {
         return Promise.resolve(
           failure(
@@ -127,7 +148,11 @@ export function memoryAdapter(
       notify(key, stored);
       return Promise.resolve({ ok: true, value: stored });
     },
-    remove: (key) => {
+    remove: (key, options) => {
+      const aborted = stopped<null>(key, 'remove', options.signal);
+      if (aborted !== null) {
+        return aborted;
+      }
       entries.delete(key);
       notify(key, null);
       return Promise.resolve({ ok: true, value: null });

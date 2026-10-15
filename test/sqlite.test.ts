@@ -387,36 +387,64 @@ void describe('sqliteAdapter', () => {
   });
 
   void describe('with a database file shared by two connections', () => {
-    function withFile(run: (path: string) => Promise<void>): Promise<void> {
+    /**
+     * Runs `run` with a function that opens connections to one database file. Every
+     * connection is closed afterwards, even when a check fails, because Windows will
+     * not delete a file that is still open. Removing the folder is best effort: a
+     * leftover temporary folder must not fail a test that otherwise passed.
+     */
+    async function withFile(
+      run: (open: () => DatabaseSync) => Promise<void>
+    ): Promise<void> {
       const directory: string = mkdtempSync(join(tmpdir(), 'sqlite-adapter-'));
-      return run(join(directory, 'store.db')).finally(() => {
-        rmSync(directory, { recursive: true, force: true });
-      });
+      const path: string = join(directory, 'store.db');
+      const opened: DatabaseSync[] = [];
+      try {
+        await run(() => {
+          const database = new DatabaseSync(path);
+          opened.push(database);
+          return database;
+        });
+      } finally {
+        for (const database of opened) {
+          try {
+            database.close();
+          } catch {
+            // Already closed by the test.
+          }
+        }
+        try {
+          rmSync(directory, {
+            recursive: true,
+            force: true,
+            maxRetries: 10,
+            retryDelay: 50,
+          });
+        } catch {
+          // The operating system clears its temporary folder in time.
+        }
+      }
     }
 
     void it('keeps data after the connection is closed and reopened', () =>
-      withFile(async (path) => {
-        const first = new DatabaseSync(path);
+      withFile(async (open) => {
+        const first = open();
         expectOk(
           await sqliteAdapter({ database: first }).set('a', 'kept', { signal })
         );
         first.close();
-        const second = new DatabaseSync(path);
         assert.deepEqual(
           expectOk(
-            await sqliteAdapter({ database: second }).get('a', { signal })
+            await sqliteAdapter({ database: open() }).get('a', { signal })
           ),
           { value: 'kept', revision: '1' }
         );
-        second.close();
       }));
 
     void it('lets exactly one of two writers with the same ifRevision win', () =>
-      withFile(async (path) => {
-        const firstDatabase = new DatabaseSync(path);
-        const secondDatabase = new DatabaseSync(path);
-        const first = sqliteAdapter({ database: firstDatabase });
-        const second = sqliteAdapter({ database: secondDatabase });
+      withFile(async (open) => {
+        const first = sqliteAdapter({ database: open() });
+        const second = sqliteAdapter({ database: open() });
         expectOk(await first.set('a', 'start', { signal }));
         const results = await Promise.all([
           first.set('a', 'from first', { signal, ifRevision: '1' }),
@@ -430,16 +458,12 @@ void describe('sqliteAdapter', () => {
           expectOk(await second.get('a', { signal }))?.revision,
           '2'
         );
-        firstDatabase.close();
-        secondDatabase.close();
       }));
 
     void it('reports a write made by the other connection as a conflict', () =>
-      withFile(async (path) => {
-        const firstDatabase = new DatabaseSync(path);
-        const secondDatabase = new DatabaseSync(path);
-        const first = sqliteAdapter({ database: firstDatabase });
-        const second = sqliteAdapter({ database: secondDatabase });
+      withFile(async (open) => {
+        const first = sqliteAdapter({ database: open() });
+        const second = sqliteAdapter({ database: open() });
         const loaded = expectOk(await first.set('a', 'v1', { signal }));
         expectOk(await second.set('a', 'v2', { signal }));
         expectFailure(
@@ -450,8 +474,6 @@ void describe('sqliteAdapter', () => {
           'conflict',
           'a'
         );
-        firstDatabase.close();
-        secondDatabase.close();
       }));
   });
 });
