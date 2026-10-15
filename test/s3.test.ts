@@ -67,7 +67,69 @@ runConformance('s3Adapter with a prefix', {
   },
 });
 
+runConformance(
+  's3Adapter on a Spaces-like store (bare ETags, 412 for a missing object)',
+  {
+    ownWrites: 'notifies',
+    create: () => {
+      const store = fakeObjectStore('spaces');
+      return {
+        adapter: s3Adapter({ store }),
+        reopen: () => s3Adapter({ store }),
+      };
+    },
+  }
+);
+
 void describe('s3Adapter', () => {
+  void describe('a store that wants the ETag without quotes', () => {
+    void it('sends If-Match without quotes and detects conflicts', async () => {
+      const store = fakeObjectStore('spaces');
+      const adapter = s3Adapter({ store });
+      const first = expectOk(await adapter.set('k', 'v1', { signal }));
+      const second = expectOk(
+        await adapter.set('k', 'v2', {
+          signal,
+          ifRevision: first.revision ?? '',
+        })
+      );
+      assert.equal(store.objects.get('k'), 'v2');
+      const stale = expectFailure(
+        await adapter.set('k', 'v3', {
+          signal,
+          ifRevision: first.revision ?? '',
+        }),
+        'conflict',
+        'k'
+      );
+      assert.ok(stale.includes(second.revision ?? ''), stale);
+      assert.equal(store.objects.get('k'), 'v2');
+      const checked = store.calls.filter(
+        (call) => call.startsWith('put k if-match') && !call.includes('"')
+      );
+      assert.ok(checked.length >= 2, store.calls.join('\n'));
+    });
+
+    void it('creates an absent key even though the store answers 412 for it', async () => {
+      const store = fakeObjectStore('spaces');
+      const adapter = s3Adapter({ store });
+      expectOk(await adapter.set('new', 'v', { signal, ifRevision: '"abc"' }));
+      assert.equal(store.objects.get('new'), 'v');
+    });
+
+    void it('refuses a store that accepts any unquoted If-Match', async () => {
+      const store = fakeObjectStore('unquoted-accepts-any');
+      const adapter = s3Adapter({ store });
+      const message = expectFailure(
+        await adapter.set('k', 'v', { signal, ifRevision: '"abc"' }),
+        'invalid',
+        'k'
+      );
+      assert.match(message, /whatever its value/);
+      assert.equal(store.objects.has('k'), false);
+    });
+  });
+
   void it('stores each key as an object under the prefix, with the ETag as its revision', async () => {
     const store = fakeObjectStore();
     const adapter = s3Adapter({ store, prefix: 'app/' });

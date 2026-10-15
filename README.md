@@ -240,10 +240,9 @@ reports changes made through the same adapter; it does not listen for writes mad
 other processes.
 
 Observed so far: Amazon S3's documented behaviour (through the `moto` emulator) works.
-DigitalOcean Spaces (tested on `sfo3`, October 2026) refuses wrong and stale ETags and
-a second create, but also refuses a write whose `If-Match` is the object's own ETag,
-so `ifRevision` writes are refused by the check there; plain `set`, `get` and `remove`
-work. Run the check below to see how your own service behaves.
+DigitalOcean Spaces (tested on `sfo3`, October 2026) refuses a quoted ETag in
+`If-Match` but accepts it without quotes, and answers 412 rather than 404 for a missing
+object; the adapter works out both by itself, so `ifRevision` works there. Run the check below to see how your own service behaves.
 
 To see how a particular service behaves before you rely on it, run the check from a
 clone of this repository. It tries each conditional write step by step against your

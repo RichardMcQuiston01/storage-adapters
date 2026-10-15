@@ -290,6 +290,17 @@ async function main(): Promise<number> {
     );
     return 3;
   }
+  if (
+    rejectedMatches > 0 &&
+    checked.ok &&
+    !stale.ok &&
+    stale.code === 'conflict'
+  ) {
+    console.log(
+      'Result: this store wants the ETag in If-Match without quotes (as DigitalOcean Spaces does). s3Adapter works that out by itself, so ifRevision conflict checks are safe to use.'
+    );
+    return 0;
+  }
   if (rejectedMatches > 0) {
     console.log(
       'Result: this store refuses a conditional write even when the ETag is right, so every revision check would report a conflict. s3Adapter detects this and refuses ifRevision writes on it (code "invalid"); plain set, get and remove still work.'
