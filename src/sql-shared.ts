@@ -1,5 +1,5 @@
 /**
- * Small pieces shared by the server SQL adapters (`/postgres` and `/mysql`): the
+ * Small pieces shared by the server SQL adapters (`/postgres`, `/mysql` and `/redis`): the
  * list of change listeners, error text, and the checks on user-supplied names and
  * revisions. Like the rest of `src/`, this does no I/O.
  */

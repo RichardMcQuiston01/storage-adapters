@@ -189,6 +189,49 @@ compared exactly (case and trailing spaces count) and can be up to 1024 bytes of
 UTF-8; a longer key is `invalid`. `subscribe` reports changes made through the same
 adapter; it does not listen for writes made by other processes.
 
+#### Redis storage
+
+For servers that already run Redis (or Valkey, KeyDB, Dragonfly), use `redisAdapter`
+from the optional `/redis` entry point. It imports no client: you connect and pass it
+in. A small wrapper turns `ioredis` or node-redis (the `redis` package) into the one
+thing the adapter needs, a way to send a command.
+
+```ts
+import { Redis } from 'ioredis';
+import {
+  redisAdapter,
+  redisCommandsFromIoredis,
+  redisSubscriberFromIoredis,
+} from '@richardmcquiston01/storage-adapters/redis';
+
+const adapter: StorageAdapter = redisAdapter({
+  client: redisCommandsFromIoredis(new Redis(process.env.REDIS_URL)),
+  prefix: 'app:', // default "storage:"
+  ttlSeconds: 3600, // optional: expire keys an hour after each write
+  // Optional: a second connection, to hear about other processes' writes.
+  subscriber: redisSubscriberFromIoredis(new Redis(process.env.REDIS_URL)),
+});
+```
+
+With node-redis use `redisCommandsFromNodeRedis(client)` and
+`redisSubscriberFromNodeRedis(client.duplicate())` (connected). Anything with
+`command(args: string[])` resolving the reply works too.
+
+Each key is one hash, `prefix` plus the key, holding `r` (the revision, a counter
+from 1) and `v` (the value). A short Lua script checks the revision, writes, sets the
+expiry and announces the change in one step, so two processes racing with the same
+`ifRevision` cannot both win: one gets `conflict`. A key with nothing stored is
+created. An expired key reads as missing and its revision starts again at 1. Running
+out of memory is `quota`, a refused login or command is `forbidden`, a key that holds
+something other than a stored entry is `corrupt`, an unreachable server is
+`unavailable`, and nothing throws.
+
+`subscribe` reports changes made through the same adapter. Given a `subscriber`
+connection (Redis does not let a subscribed connection run other commands, so it must
+be separate) it also reports changes other processes make with the same `prefix`,
+using Pub/Sub, which needs no server settings. If the subscriber cannot start, writes
+still work; pass `onSubscriberError` to hear about it.
+
 #### S3 and DigitalOcean Spaces storage
 
 To keep values in a bucket, use `s3Adapter` from the optional `/s3` entry point. It
@@ -463,7 +506,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 

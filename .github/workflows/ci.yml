@@ -57,7 +57,7 @@ jobs:
       - run: bun run build
       - run: bun run smoke:dist
 
-  # The PostgreSQL and MySQL adapters, against real servers. The default test run
+  # The PostgreSQL, MySQL and Redis adapters, against real servers. The default test run
   # skips these (it uses PGlite for PostgreSQL and has no MySQL), so this job sets
   # the connection strings that switch them on.
   databases:
@@ -87,7 +87,17 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
+      TEST_REDIS_URL: redis://127.0.0.1:6379
       TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/adapters
       TEST_MYSQL_URL: mysql://root:mysql@127.0.0.1:3306/adapters
     steps:
@@ -96,7 +106,7 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
-      - run: bun test test/databases.test.ts test/postgres.test.ts test/mysql.test.ts
+      - run: bun test test/databases.test.ts test/postgres.test.ts test/mysql.test.ts test/redis.test.ts
 
   # The S3 adapter, against an S3-compatible server. The default test run skips these
   # (it uses an in-memory store). moto implements S3's conditional writes, so it
