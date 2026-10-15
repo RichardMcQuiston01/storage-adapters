@@ -136,6 +136,59 @@ with the same `ifRevision` cannot both win: one gets `conflict`. A full disk is
 nothing throws. `subscribe` reports changes made through the same adapter, like
 `memoryAdapter`; SQLite cannot announce writes made by other processes.
 
+#### PostgreSQL storage
+
+For servers that already run PostgreSQL, use `postgresAdapter` from the optional
+`/postgres` entry point. It imports no driver: you connect and pass the client in.
+Anything with a `query(sql, parameters)` that resolves `{ rows }` works, which
+covers `pg` (a `Pool` or a `Client`) and PGlite.
+
+```ts
+import { Pool } from 'pg';
+import { postgresAdapter } from '@richardmcquiston01/storage-adapters/postgres';
+
+const adapter: StorageAdapter = postgresAdapter({
+  client: new Pool({ connectionString: process.env.DATABASE_URL }),
+});
+```
+
+The table `storage_entry` (or the one you name with `table`) is created on first
+use, with a native `uuid` id, the key, the value, a counter revision, and
+`created_at` and `updated_at` timestamps. It needs PostgreSQL 13 or later. The
+revision check and the write are one `INSERT ... ON CONFLICT ... WHERE ...
+RETURNING` statement, so two connections racing with the same `ifRevision` cannot
+both win: one gets `conflict`. A key with nothing stored is created. A full disk is
+`quota`, a missing privilege is `forbidden`, a value PostgreSQL cannot store (such as
+a NUL character) is `invalid`, and nothing throws. `subscribe` reports changes made
+through the same adapter; it does not listen for writes made by other processes.
+
+#### MySQL storage
+
+For servers that run MySQL or MariaDB, use `mysqlAdapter` from the optional `/mysql`
+entry point. It imports no driver: you connect and pass the client in. Anything
+whose `query(sql, parameters)` resolves `[result, ...]` works, which is how
+`mysql2/promise` (a `Pool` or a `Connection`) behaves. Connect with the `utf8mb4`
+character set so emoji and other four-byte characters are kept.
+
+```ts
+import { createPool } from 'mysql2/promise';
+import { mysqlAdapter } from '@richardmcquiston01/storage-adapters/mysql';
+
+const adapter: StorageAdapter = mysqlAdapter({
+  client: createPool({ uri: process.env.DATABASE_URL, charset: 'utf8mb4' }),
+});
+```
+
+The table is the same as for PostgreSQL, with the id kept as `CHAR(36)`. MySQL has
+no `RETURNING`, so each write sets `revision = LAST_INSERT_ID(revision + 1)` and
+reads the new revision back from that statement's own result. A conditional write
+is an `UPDATE ... WHERE revision = ?`; when it matches nothing, a plain `INSERT`
+either creates the key or fails with "duplicate entry", which is reported as
+`conflict`. Every step is a single statement, so it is safe on a pool. Keys are
+compared exactly (case and trailing spaces count) and can be up to 1024 bytes of
+UTF-8; a longer key is `invalid`. `subscribe` reports changes made through the same
+adapter; it does not listen for writes made by other processes.
+
 #### File storage
 
 For small servers, scripts and tools that want plain files, use `fileAdapter` from
@@ -231,6 +284,7 @@ Choose by how much data you have and who writes it:
 | `yamlFileAdapter`, `iniFileAdapter` | Settings a person edits by hand in YAML or INI | Rewrites the whole file and drops comments; one process |
 | `fileAdapter` | Many or large values | One process per directory |
 | `sqliteAdapter` | Several processes writing | Needs a SQLite driver |
+| `postgresAdapter`, `mysqlAdapter` | Several servers sharing one database | Needs a driver and a running server |
 
 #### YAML and INI file storage
 
@@ -338,7 +392,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 

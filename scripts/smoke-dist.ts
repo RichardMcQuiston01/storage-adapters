@@ -17,6 +17,8 @@ import * as fileNode from '../dist/file-node.js';
 import * as file from '../dist/file.js';
 import * as iniFile from '../dist/ini-file.js';
 import * as jsonFile from '../dist/json-file.js';
+import * as mysql from '../dist/mysql.js';
+import * as postgres from '../dist/postgres.js';
 import * as sqlite from '../dist/sqlite.js';
 import * as yamlFile from '../dist/yaml-file.js';
 import * as indexeddb from '../dist/indexeddb.js';
@@ -34,6 +36,8 @@ const entries: Record<string, Record<string, unknown>> = {
   browser,
   indexeddb,
   sqlite,
+  postgres,
+  mysql,
   file,
   fileNode,
   jsonFile,
