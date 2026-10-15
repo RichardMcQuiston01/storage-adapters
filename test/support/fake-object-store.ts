@@ -18,6 +18,7 @@ export function s3Error(
 /** How the fake treats `If-Match` and `If-None-Match`. */
 export type ConditionMode =
   | 'enforced' // like Amazon S3
+  | 'rejects-matching' // refuses If-Match even with the right ETag (as DigitalOcean Spaces did)
   | 'ignored' // writes go through whatever the condition says
   | 'not-implemented'; // 501 for any write that has a condition
 
@@ -69,9 +70,15 @@ export function fakeObjectStore(
       if (conditional && store.mode === 'not-implemented') {
         return Promise.reject(s3Error('NotImplemented', 501));
       }
-      if (conditional && store.mode === 'enforced') {
+      if (
+        conditional &&
+        (store.mode === 'enforced' || store.mode === 'rejects-matching')
+      ) {
         const current = objects.get(key);
         if (ifMatch !== undefined) {
+          if (store.mode === 'rejects-matching') {
+            return Promise.reject(s3Error('PreconditionFailed', 412));
+          }
           if (current === undefined) {
             return Promise.reject(s3Error('NoSuchKey', 404));
           }

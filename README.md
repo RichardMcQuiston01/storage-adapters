@@ -225,16 +225,25 @@ created with `If-None-Match: *`, so a race to create it has one winner too. Keys
 be up to 1024 bytes of UTF-8 including the prefix, and a key with a `.` or `..` path
 segment is `invalid`, because URL handling would turn it into a different key.
 
-Some S3-compatible services ignore `If-Match` and would silently lose the conflict
-check. Before the first write that uses `ifRevision`, the adapter checks once, on a
-throwaway object under the prefix (three conditional writes and a delete), that the
-store really refuses a second create and a write with the wrong ETag. If it does not,
-that write is refused with `invalid` and a message saying so, and plain writes keep
-working. Amazon S3 enforces conditions; set `verifyConditionalWrites: false` to skip
-the check if you know your service does too. A permission error is `forbidden`, a
-storage quota is `quota`, throttling and network errors are `unavailable`, and
-nothing throws. `subscribe` reports changes made through the same adapter; it does
-not listen for writes made by other processes.
+Some S3-compatible services do not handle conditional writes correctly: one may
+ignore `If-Match` and silently lose the conflict check, another may refuse a write
+even when the ETag is right, so every check would report a conflict. Before the first
+write that uses `ifRevision`, the adapter checks once, on a throwaway object under the
+prefix (a create, a second create, a write with a wrong ETag and a write with the
+object's own ETag, then a delete), that the store refuses the two that must be refused
+and accepts the one that must be accepted. If it does not, that write is refused with
+`invalid` and a message saying which, and plain writes keep working. Amazon S3 handles
+conditions correctly; set `verifyConditionalWrites: false` to skip the check if you know
+your service does too. A permission error is `forbidden`, a storage quota is `quota`,
+throttling and network errors are `unavailable`, and nothing throws. `subscribe`
+reports changes made through the same adapter; it does not listen for writes made by
+other processes.
+
+Observed so far: Amazon S3's documented behaviour (through the `moto` emulator) works.
+DigitalOcean Spaces (tested on `sfo3`, October 2026) refuses wrong and stale ETags and
+a second create, but also refuses a write whose `If-Match` is the object's own ETag,
+so `ifRevision` writes are refused by the check there; plain `set`, `get` and `remove`
+work. Run the check below to see how your own service behaves.
 
 To see how a particular service behaves before you rely on it, run the check from a
 clone of this repository. It tries each conditional write step by step against your

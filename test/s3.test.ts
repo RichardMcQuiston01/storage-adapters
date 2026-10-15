@@ -155,7 +155,10 @@ void describe('s3Adapter', () => {
         'k',
         'DigitalOcean Spaces'
       );
-      assert.match(message, /does not enforce conditional writes/);
+      assert.match(
+        message,
+        /ignores If-Match and If-None-Match|does not implement conditional writes/
+      );
       assert.match(message, /Write without ifRevision/);
       assert.equal(store.objects.has('k'), false, 'nothing may be written');
       assert.deepEqual([...store.objects.keys()], [], 'no probe object left');
@@ -171,6 +174,69 @@ void describe('s3Adapter', () => {
       assert.equal(probeKeys(store).length, probes);
     });
 
+    void it('refuses a revision check on a store that rejects an If-Match with the right ETag, and says why', async () => {
+      const store = fakeObjectStore('rejects-matching');
+      const adapter = s3Adapter({ store, name: 'DigitalOcean Spaces' });
+      const message = expectFailure(
+        await adapter.set('k', 'v', { signal, ifRevision: '"abc"' }),
+        'invalid',
+        'k',
+        'DigitalOcean Spaces'
+      );
+      assert.match(
+        message,
+        /refuses a write whose If-Match is the object's own ETag/
+      );
+      assert.match(message, /every revision check would fail/);
+      assert.equal(store.objects.has('k'), false, 'nothing may be written');
+      assert.deepEqual([...store.objects.keys()], [], 'no probe object left');
+    });
+
+    void it('still lets plain reads and writes through on such a store', async () => {
+      const store = fakeObjectStore('rejects-matching');
+      const adapter = s3Adapter({ store });
+      const written = expectOk(await adapter.set('k', 'v', { signal }));
+      assert.deepEqual(await adapter.get('k', { signal }), {
+        ok: true,
+        value: written,
+      });
+      await adapter.set('k', 'w', {
+        signal,
+        ifRevision: written.revision ?? '',
+      });
+      assert.equal(
+        store.objects.get('k'),
+        'v',
+        'the checked write must not go through'
+      );
+    });
+
+    void it("accepts the probe object's own ETag on a store that handles conditions correctly", async () => {
+      const store = fakeObjectStore();
+      await s3Adapter({ store }).set('k', 'v', { signal, ifRevision: 'x' });
+      assert.ok(
+        store.calls.some((call) =>
+          /put .*\.storage-adapters-probe-.* if-match "[0-9a-f]{32}"/.test(call)
+        ),
+        store.calls.join('\n')
+      );
+    });
+
+    void it('treats a store that returns no ETag from the probe as unusable for revisions', async () => {
+      const store = fakeObjectStore();
+      const realPut = store.putObject.bind(store);
+      store.putObject = async (key, body, options) => {
+        const result = await realPut(key, body, options);
+        return key.includes('.storage-adapters-probe-') ? { etag: '' } : result;
+      };
+      const message = expectFailure(
+        await s3Adapter({ store }).set('k', 'v', { signal, ifRevision: 'x' }),
+        'invalid',
+        'k'
+      );
+      assert.match(message, /returned no ETag/);
+    });
+
     void it('refuses a revision check on a store that answers 501 Not Implemented', async () => {
       const store = fakeObjectStore('not-implemented');
       const message = expectFailure(
@@ -178,7 +244,10 @@ void describe('s3Adapter', () => {
         'invalid',
         'k'
       );
-      assert.match(message, /does not enforce conditional writes/);
+      assert.match(
+        message,
+        /ignores If-Match and If-None-Match|does not implement conditional writes/
+      );
     });
 
     void it('does not remember a check that could not be made, so the next write checks again', async () => {

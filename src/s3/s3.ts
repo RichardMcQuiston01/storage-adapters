@@ -61,11 +61,13 @@ export interface S3AdapterOptions {
   /** Names the store in messages, for example `"DigitalOcean Spaces"`. Defaults to `"S3"`. */
   readonly name?: string;
   /**
-   * Before the first write that uses `ifRevision`, check once that the store really
-   * enforces `If-Match` and `If-None-Match` (a few extra requests on a throwaway
-   * object). A store that ignores them would silently lose the conflict check, so
-   * such a write is refused with `invalid` instead. Set `false` if you know your
-   * store enforces them, as Amazon S3 does. Defaults to `true`.
+   * Before the first write that uses `ifRevision`, check once that the store handles
+   * `If-Match` and `If-None-Match` correctly (a few extra requests on a throwaway
+   * object): it must refuse a second create and a wrong ETag, and accept an object's
+   * own ETag. A store that ignores the headers would silently lose the conflict
+   * check, and one that refuses a matching ETag would fail every check, so such a
+   * write is refused with `invalid` and a message saying which. Set `false` if you
+   * know your store handles them, as Amazon S3 does. Defaults to `true`.
    */
   readonly verifyConditionalWrites?: boolean;
 }
@@ -208,29 +210,41 @@ export function s3Adapter(options: S3AdapterOptions): StorageAdapter {
   const label: string = options.name ?? DEFAULT_NAME;
   const verify: boolean = options.verifyConditionalWrites ?? true;
   const listeners = createChangeListeners();
-  let support: Promise<boolean> | null = verify ? null : Promise.resolve(true);
+  let support: Promise<string | null> | null = verify
+    ? null
+    : Promise.resolve(null);
 
   const objectKeyOf = (key: string): string => `${prefix}${key}`;
 
   /**
-   * Checks once that conditional writes are enforced, on a throwaway object: a create
-   * that must succeed, a second create that must fail, and a write with the wrong
-   * ETag that must fail. Resolves false if any of them is let through or refused as
-   * not implemented. A failure to find out (no permission, network) is thrown and
-   * not remembered, so the next write checks again.
+   * Checks once that the store handles conditional writes correctly, on a throwaway
+   * object: a create that must succeed, a second create and a write with the wrong
+   * ETag that must be refused, and a write with the object's own ETag that must be
+   * accepted. Resolves why the store cannot be used, or `null` if it can. A failure
+   * to find out (no permission, network) is thrown and not remembered, so the next
+   * write checks again.
    */
-  const conditionalWritesWork = (signal: AbortSignal): Promise<boolean> => {
+  const conditionalWritesProblem = (
+    signal: AbortSignal
+  ): Promise<string | null> => {
     if (support === null) {
       const probeKey = `${prefix}.storage-adapters-probe-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-      const run = async (): Promise<boolean> => {
+      const notImplemented = 'does not implement conditional writes (If-Match)';
+      const run = async (): Promise<string | null> => {
         let created = false;
         try {
+          let etag: string;
           try {
-            await store.putObject(probeKey, '', { signal, ifNoneMatch: '*' });
+            etag = (
+              await store.putObject(probeKey, 'probe', {
+                signal,
+                ifNoneMatch: '*',
+              })
+            ).etag;
             created = true;
           } catch (error: unknown) {
             if (isNotImplemented(error) || statusOf(error) === 400) {
-              return false;
+              return notImplemented;
             }
             throw error;
           }
@@ -243,17 +257,31 @@ export function s3Adapter(options: S3AdapterOptions): StorageAdapter {
                 signal,
                 ...condition,
               });
-              return false; // The condition was ignored.
+              return 'ignores If-Match and If-None-Match, so a revision check would be silently skipped';
             } catch (error: unknown) {
               if (isNotImplemented(error)) {
-                return false;
+                return notImplemented;
               }
               if (!isFailedCondition(error)) {
                 throw error;
               }
             }
           }
-          return true;
+          if (etag === '') {
+            return 'returned no ETag to use as a revision';
+          }
+          try {
+            await store.putObject(probeKey, 'probe', { signal, ifMatch: etag });
+          } catch (error: unknown) {
+            if (isNotImplemented(error)) {
+              return notImplemented;
+            }
+            if (isFailedCondition(error)) {
+              return "refuses a write whose If-Match is the object's own ETag, so every revision check would fail";
+            }
+            throw error;
+          }
+          return null;
         } finally {
           if (created) {
             try {
@@ -368,12 +396,13 @@ export function s3Adapter(options: S3AdapterOptions): StorageAdapter {
           const written = await store.putObject(objectKey, value, { signal });
           return stored(key, value, written.etag);
         }
-        if (!(await conditionalWritesWork(signal))) {
+        const problem: string | null = await conditionalWritesProblem(signal);
+        if (problem !== null) {
           return sqlFailure(
             label,
             'invalid',
             key,
-            `cannot check revision ${ifRevision}: ${label} does not enforce conditional writes (If-Match), so the check would be silently skipped. Write without ifRevision (last write wins), or set verifyConditionalWrites to false if you know it does`
+            `cannot check revision ${ifRevision}: ${label} ${problem}. Write without ifRevision (last write wins), or set verifyConditionalWrites to false if you know it works`
           );
         }
         for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
