@@ -19,6 +19,9 @@
   and `mysqlAdapter()`.
 - **0.8.0**: the `/s3` entry point with `s3Adapter()` (Amazon S3 and
   S3-compatible services, including DigitalOcean Spaces).
+- **0.9.0**: the `/redis` entry point with `redisAdapter()`; `fileAdapter`
+  reports other processes' changes; fixes for fourteen bugs found in review;
+  CI actions pinned to commit SHAs.
 
 ## Ground rules for every new adapter
 
