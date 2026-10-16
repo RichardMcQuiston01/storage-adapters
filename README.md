@@ -349,7 +349,12 @@ processes writing the same directory can lose updates. In a test with four
 processes each adding 1 to a shared counter 40 times, about half of the additions
 were lost. Use the SQLite adapter when more than one process writes. The adapter
 does not `fsync`, so a power failure shortly after a write can lose it.
-`subscribe` reports changes made through adapters in this process.
+`subscribe` reports changes made through adapters in this process and, when the
+file system can watch a directory (`nodeFileSystem()` can), files that another
+process or a person changes, writes, replaces or deletes. It stays quiet for a
+file that did not change and for half-written files, and the folder is watched only
+while someone is subscribed. Hearing about another process's write does not make
+two writers safe; the warning above still applies.
 
 #### JSON file storage
 

@@ -47,6 +47,17 @@ export interface FileSystemLike {
    * watching. A file replaced by a rename must still be noticed.
    */
   watch?(path: string, onChange: () => void): () => void;
+  /**
+   * Optional. Calls `onChange` with the name of the file (just the name, not the
+   * path) whenever something in the directory is created, changed, replaced, renamed
+   * or removed, including by another program, or with `null` when the system cannot
+   * say which. Returns a function that stops watching. It lets `fileAdapter` report
+   * writes made by other processes.
+   */
+  watchDirectory?(
+    directory: string,
+    onChange: (name: string | null) => void
+  ): () => void;
 }
 
 export interface FileAdapterOptions {
@@ -167,7 +178,9 @@ function failedWith<T>(
  * `conflict` when another write got there first, as long as every writer is in this
  * process. Separate processes writing the same directory can lose an update; use
  * the SQLite adapter when that matters. `subscribe` reports changes made through
- * adapters in this process. Nothing throws: every failure is a `StoreResult`.
+ * adapters in this process and, when the file system can watch a directory
+ * (`watchDirectory`, which `nodeFileSystem` has), changes other processes make to
+ * the files. Nothing throws: every failure is a `StoreResult`.
  */
 export function fileAdapter(options: FileAdapterOptions): StorageAdapter {
   const { fileSystem } = options;
@@ -218,13 +231,125 @@ export function fileAdapter(options: FileAdapterOptions): StorageAdapter {
       'cannot use this key (it must be 1 to 200 characters after encoding, and valid Unicode)'
     );
 
+  /** What each subscribed key last held, so a watcher event that changes nothing is silent. */
+  const known = new Map<string, StoredValue | null>();
+  /** Subscribed keys by the file name stem they are stored under. */
+  const subscribedStems = new Map<string, string>();
+  let watchState: 'off' | 'starting' | 'on' = 'off';
+  let stopWatching: (() => void) | null = null;
+
+  const sameStored = (
+    left: StoredValue | null | undefined,
+    right: StoredValue | null
+  ): boolean =>
+    left !== undefined &&
+    (left === right ||
+      (left !== null &&
+        right !== null &&
+        left.value === right.value &&
+        left.revision === right.revision));
+
   const notify = (key: string, stored: StoredValue | null): void => {
+    if (listeners.has(key)) {
+      known.set(key, stored);
+    }
     for (const listener of listeners.get(key) ?? []) {
       try {
         listener(stored);
       } catch {
         // A faulty listener must not turn a successful write into a failure.
       }
+    }
+  };
+
+  /** Reads a key under its lock and reports it if it differs from what was last seen. */
+  const refresh = (key: string, stem: string): Promise<void> =>
+    withLock(`${directory}\u0000${stem}`, async (): Promise<void> => {
+      if (!listeners.has(key)) {
+        return;
+      }
+      let envelope: Envelope | null | undefined;
+      try {
+        envelope = await readEnvelope(pathOf(stem));
+      } catch {
+        return; // Try again on the next change.
+      }
+      if (envelope === undefined) {
+        return; // Half-written or not an entry; wait for the next change.
+      }
+      const current: StoredValue | null =
+        envelope === null ? null : { value: envelope.v, revision: envelope.r };
+      if (!sameStored(known.get(key), current)) {
+        notify(key, current);
+      }
+    });
+
+  /** Takes the file as it is now as the starting point for a new subscription. */
+  const baseline = (key: string, stem: string): Promise<void> =>
+    withLock(`${directory}\u0000${stem}`, async (): Promise<void> => {
+      if (known.has(key) || !listeners.has(key)) {
+        return;
+      }
+      try {
+        const envelope = await readEnvelope(pathOf(stem));
+        if (envelope !== undefined && !known.has(key)) {
+          known.set(
+            key,
+            envelope === null
+              ? null
+              : { value: envelope.v, revision: envelope.r }
+          );
+        }
+      } catch {
+        // No starting point; the first change will be reported.
+      }
+    });
+
+  const onDirectoryChange = (name: string | null): void => {
+    if (name === null) {
+      for (const [stem, key] of subscribedStems) {
+        void refresh(key, stem);
+      }
+      return;
+    }
+    if (!name.endsWith(FILE_EXTENSION)) {
+      return; // Temporary files and anything that is not ours.
+    }
+    const stem: string = name.slice(0, -FILE_EXTENSION.length);
+    const key: string | undefined = subscribedStems.get(stem);
+    if (key !== undefined) {
+      void refresh(key, stem);
+    }
+  };
+
+  const startWatching = (): void => {
+    if (fileSystem.watchDirectory === undefined || watchState !== 'off') {
+      return;
+    }
+    watchState = 'starting';
+    void (async (): Promise<void> => {
+      try {
+        await ensureDirectory();
+        if (watchState !== 'starting') {
+          return; // Everyone unsubscribed while this was starting.
+        }
+        stopWatching =
+          fileSystem.watchDirectory?.(directory, onDirectoryChange) ?? null;
+        watchState = 'on';
+      } catch {
+        watchState = 'off'; // Watching is a bonus; the adapter works without it.
+      }
+    })();
+  };
+
+  const stopWatchingNow = (): void => {
+    watchState = 'off';
+    const stop: (() => void) | null = stopWatching;
+    stopWatching = null;
+    try {
+      stop?.();
+    } catch {
+      // Nothing useful to do if closing the watcher fails.
     }
   };
 
@@ -295,6 +420,9 @@ export function fileAdapter(options: FileAdapterOptions): StorageAdapter {
             );
             await fileSystem.rename(temporaryPath, path);
             temporaryPath = null;
+            // Announced while the key is still locked, so a watcher that reads the
+            // file next finds this already reported and says nothing more.
+            notify(key, { value, revision });
             return { ok: true, value: { value, revision } };
           } catch (error: unknown) {
             if (temporaryPath !== null) {
@@ -308,9 +436,6 @@ export function fileAdapter(options: FileAdapterOptions): StorageAdapter {
           }
         }
       );
-      if (result.ok) {
-        notify(key, result.value);
-      }
       return result;
     },
 
@@ -328,15 +453,13 @@ export function fileAdapter(options: FileAdapterOptions): StorageAdapter {
         async (): Promise<StoreResult<null>> => {
           try {
             await fileSystem.remove(pathOf(stem));
+            notify(key, null);
             return { ok: true, value: null };
           } catch (error: unknown) {
             return failedWith(error, key, 'removed');
           }
         }
       );
-      if (result.ok) {
-        notify(key, null);
-      }
       return result;
     },
 
@@ -345,10 +468,23 @@ export function fileAdapter(options: FileAdapterOptions): StorageAdapter {
         listeners.get(key) ?? new Set();
       set.add(onChange);
       listeners.set(key, set);
+      const stem: string | undefined = encodeKey(key);
+      if (stem !== undefined) {
+        subscribedStems.set(stem, key);
+        void baseline(key, stem);
+      }
+      startWatching();
       return () => {
         set.delete(onChange);
         if (set.size === 0) {
           listeners.delete(key);
+          known.delete(key);
+          if (stem !== undefined) {
+            subscribedStems.delete(stem);
+          }
+        }
+        if (listeners.size === 0) {
+          stopWatchingNow();
         }
       };
     },
