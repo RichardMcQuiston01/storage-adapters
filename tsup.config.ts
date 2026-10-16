@@ -11,6 +11,7 @@ export default defineConfig({
     postgres: 'src/postgres/index.ts',
     mysql: 'src/mysql/index.ts',
     s3: 'src/s3/index.ts',
+    redis: 'src/redis/index.ts',
     file: 'src/file/index.ts',
     'file-node': 'src/file/node.ts',
     'json-file': 'src/json-file/index.ts',

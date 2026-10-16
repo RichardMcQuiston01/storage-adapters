@@ -105,7 +105,13 @@ export function memoryAdapter(
     entries.set(key, { value, revision: String(counter) });
   }
   const notify = (key: string, stored: StoredValue | null): void => {
-    for (const listener of listeners.get(key) ?? []) listener(stored);
+    for (const listener of listeners.get(key) ?? []) {
+      try {
+        listener(stored);
+      } catch {
+        // A faulty listener must not turn a write that happened into a failure.
+      }
+    }
   };
   const stopped = <T>(
     key: string,
@@ -199,7 +205,9 @@ export function withPrefix(
  * Reads from `primary`, falling back to `secondary` when it errs or holds
  * nothing. Writes go to `primary` first, then `secondary` (best effort); a
  * `conflict` from `primary` is returned as is and writes nothing else. When
- * `primary` can't be written but `secondary` can, the write counts as saved.
+ * `primary` can't be written but `secondary` can, the write counts as saved, and
+ * `ifRevision` is checked against `secondary`, so a stale revision is a `conflict`
+ * there too.
  */
 export function withFallback(
   primary: StorageAdapter,
@@ -216,11 +224,17 @@ export function withFallback(
     async set(key, value, options) {
       const first = await primary.set(key, value, options);
       if (!first.ok && first.code === 'conflict') return first;
-      const second = await secondary.set(key, value, {
-        signal: options.signal,
-      });
+      // When the primary took the write, the secondary only mirrors it, and the
+      // caller's revision belongs to the primary. When the primary could not, the
+      // secondary is the store that counts, so its revision check applies.
+      const second = await secondary.set(
+        key,
+        value,
+        first.ok ? { signal: options.signal } : options
+      );
       if (first.ok) return first;
-      return second.ok ? second : first;
+      if (second.ok) return second;
+      return second.code === 'conflict' ? second : first;
     },
     async remove(key, options) {
       const first = (await primary.remove?.(key, options)) ?? {
@@ -245,32 +259,53 @@ export function withFallback(
   };
 }
 
-/** Remembers each key's last read or write, so repeated reads skip the store. */
+/**
+ * Remembers each key's last read or write, so repeated reads skip the store. A read
+ * that was already under way when a write, a removal or a change notice came in does
+ * not store its result, because it may describe the key as it was before.
+ */
 export function withReadCache(adapter: StorageAdapter): StorageAdapter {
   const cache = new Map<string, StoredValue | null>();
+  const generations = new Map<string, number>();
+  const generationOf = (key: string): number => generations.get(key) ?? 0;
+  /** Starts a new generation for the key, so anything begun earlier is stale. */
+  const advance = (key: string): number => {
+    const next: number = generationOf(key) + 1;
+    generations.set(key, next);
+    return next;
+  };
   return {
     async get(key, options) {
       const cached: StoredValue | null | undefined = cache.get(key);
       if (cached !== undefined) return { ok: true, value: cached };
+      const started: number = generationOf(key);
       const result = await adapter.get(key, options);
-      if (result.ok) cache.set(key, result.value);
+      if (result.ok && generationOf(key) === started) {
+        cache.set(key, result.value);
+      }
       return result;
     },
     async set(key, value, options) {
+      cache.delete(key);
+      const started: number = advance(key);
       const result = await adapter.set(key, value, options);
-      if (result.ok) cache.set(key, result.value);
-      else cache.delete(key);
+      if (generationOf(key) === started) {
+        if (result.ok) cache.set(key, result.value);
+        else cache.delete(key);
+      }
       return result;
     },
     async remove(key, options) {
       cache.delete(key);
-      return (
+      const started: number = advance(key);
+      const result =
         (await adapter.remove?.(key, options)) ??
         failure(
           'invalid',
           `Could not remove "${key}": remove is not supported.`
-        )
-      );
+        );
+      if (generationOf(key) === started) cache.delete(key);
+      return result;
     },
     ...(adapter.subscribe === undefined
       ? {}
@@ -280,6 +315,7 @@ export function withReadCache(adapter: StorageAdapter): StorageAdapter {
             onChange: (stored: StoredValue | null) => void
           ) =>
             adapter.subscribe?.(key, (stored) => {
+              advance(key);
               cache.set(key, stored);
               onChange(stored);
             }) ?? (() => undefined),
@@ -328,6 +364,7 @@ export function withRetry(
   const attempts: number = Math.max(1, Math.floor(options.attempts ?? 3));
   const baseDelay: number = options.delayMs ?? 200;
   const retrying = async <T>(
+    key: string,
     signal: AbortSignal,
     run: () => Promise<StoreResult<T>>
   ): Promise<StoreResult<T>> => {
@@ -340,20 +377,31 @@ export function withRetry(
       !signal.aborted;
       attempt += 1
     ) {
-      await options.sleep(baseDelay * 2 ** (attempt - 1), signal);
+      try {
+        await options.sleep(baseDelay * 2 ** (attempt - 1), signal);
+      } catch (cause) {
+        return failure(
+          'unavailable',
+          `Could not retry "${key}": waiting before the next attempt failed (${describeUnknownError(cause)}). Last error: ${result.error}`
+        );
+      }
+      if (signal.aborted) {
+        return result; // Aborted during the wait: do not start another attempt.
+      }
       result = await run();
     }
     return result;
   };
   return {
-    get: (key, o) => retrying(o.signal, () => adapter.get(key, o)),
+    get: (key, o) => retrying(key, o.signal, () => adapter.get(key, o)),
     set: (key, value, o) =>
-      retrying(o.signal, () => adapter.set(key, value, o)),
+      retrying(key, o.signal, () => adapter.set(key, value, o)),
     ...(adapter.remove === undefined
       ? {}
       : {
           remove: (key: string, o: { readonly signal: AbortSignal }) =>
             retrying(
+              key,
               o.signal,
               () =>
                 adapter.remove?.(key, o) ??
@@ -367,6 +415,12 @@ export function withRetry(
 }
 
 export interface EncodingOptions {
+  /**
+   * Called when a change reported by `subscribe` cannot be decoded, with the key and
+   * why. Without it such a change is dropped, because `onChange` has no way to carry
+   * an error. Errors from `get` are always returned as a `corrupt` result.
+   */
+  readonly onSubscribeError?: (key: string, message: string) => void;
   /** Applied before storing: compression, or encryption with your own crypto. */
   readonly encode: (value: string) => string | Promise<string>;
   /** Reverses `encode` after reading. */
@@ -429,16 +483,38 @@ export function withEncoding(
           subscribe: (
             key: string,
             onChange: (stored: StoredValue | null) => void
-          ) =>
-            adapter.subscribe?.(key, (stored) => {
-              if (stored === null) {
-                onChange(null);
-                return;
-              }
-              void decodeStored(key, stored).then((decoded) => {
-                if (decoded.ok) onChange(decoded.value);
-              });
-            }) ?? (() => undefined),
+          ) => {
+            // Decoding can take a while, so a slow one must not be delivered after
+            // a change that came in later.
+            let latest = 0;
+            let delivered = 0;
+            return (
+              adapter.subscribe?.(key, (stored) => {
+                latest += 1;
+                const order: number = latest;
+                const deliver = (run: () => void): void => {
+                  if (order < delivered) return;
+                  delivered = order;
+                  try {
+                    run();
+                  } catch {
+                    // A faulty listener must not break the stream of changes.
+                  }
+                };
+                if (stored === null) {
+                  deliver(() => onChange(null));
+                  return;
+                }
+                void decodeStored(key, stored).then((decoded) => {
+                  if (decoded.ok) {
+                    deliver(() => onChange(decoded.value));
+                  } else if (order >= delivered) {
+                    deliver(() => codec.onSubscribeError?.(key, decoded.error));
+                  }
+                });
+              }) ?? (() => undefined)
+            );
+          },
         }),
   };
 }

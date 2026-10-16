@@ -73,8 +73,12 @@ const adapter: StorageAdapter = withFallback(localStorageAdapter(), memoryAdapte
 
 Each value is stored with a counter revision, so `set` with `ifRevision`
 returns `conflict` when another tab wrote first, and `subscribe` reports
-changes made in other tabs. A full store is `quota`, blocked storage is
-`forbidden`, and nothing throws. Pass `storage` or `events` to use something
+changes made in other tabs. The check is exact within one tab but not atomic
+between tabs, because Web Storage has no compare-and-set: after writing, the
+adapter reads the key back and reports `conflict` if another tab's write landed
+after its own, which narrows the gap but cannot close it. Use `indexedDbAdapter`
+when writers in several tabs must never overwrite each other. A full store is
+`quota`, blocked storage is `forbidden`, and nothing throws. Pass `storage` or `events` to use something
 other than the global `localStorage` and `window`.
 
 For data that should last only as long as the tab, such as a half-finished form,
@@ -189,6 +193,54 @@ compared exactly (case and trailing spaces count) and can be up to 1024 bytes of
 UTF-8; a longer key is `invalid`. `subscribe` reports changes made through the same
 adapter; it does not listen for writes made by other processes.
 
+#### Redis storage
+
+For servers that already run Redis (or Valkey, KeyDB, Dragonfly), use `redisAdapter`
+from the optional `/redis` entry point. It imports no client: you connect and pass it
+in. A small wrapper turns `ioredis` or node-redis (the `redis` package) into the one
+thing the adapter needs, a way to send a command.
+
+```ts
+import { Redis } from 'ioredis';
+import {
+  redisAdapter,
+  redisCommandsFromIoredis,
+  redisSubscriberFromIoredis,
+} from '@richardmcquiston01/storage-adapters/redis';
+
+const adapter: StorageAdapter = redisAdapter({
+  client: redisCommandsFromIoredis(new Redis(process.env.REDIS_URL)),
+  prefix: 'app:', // default "storage:"
+  ttlSeconds: 3600, // optional: expire keys an hour after each write
+  // Optional: a second connection, to hear about other processes' writes.
+  subscriber: redisSubscriberFromIoredis(new Redis(process.env.REDIS_URL)),
+});
+```
+
+With node-redis use `redisCommandsFromNodeRedis(client)` and
+`redisSubscriberFromNodeRedis(client.duplicate())` (connected). Anything with
+`command(args: string[])` resolving the reply works too.
+
+Each key is one hash, `prefix` plus the key, holding `r` (the revision, a counter
+from 1) and `v` (the value). A short Lua script checks the revision, writes, sets the
+expiry and announces the change in one step, so two processes racing with the same
+`ifRevision` cannot both win: one gets `conflict`. A key with nothing stored is
+created. An expired key reads as missing and its revision starts again at 1. Running
+out of memory is `quota`, a refused login or command is `forbidden`, a key that holds
+something other than a stored entry is `corrupt`, an unreachable server is
+`unavailable`, and nothing throws.
+
+`subscribe` reports changes made through the same adapter. Given a `subscriber`
+connection (Redis does not let a subscribed connection run other commands, so it must
+be separate) it also reports changes other processes make with the same `prefix`,
+using Pub/Sub, which needs no server settings. The channel carries only the key,
+never the value: on a notice the adapter reads the hash and reports what Redis holds,
+so someone who can `PUBLISH` on the channel cannot forge a value, and someone who can
+`SUBSCRIBE` to it learns no values. Notices for the same key close together report
+the latest state. If the subscriber cannot start, writes still work, the failure goes
+to `onSubscriberError`, and the adapter tries again every `subscriberRetryMs`
+(default 5000, `0` for never) while anyone is subscribed.
+
 #### S3 and DigitalOcean Spaces storage
 
 To keep values in a bucket, use `s3Adapter` from the optional `/s3` entry point. It
@@ -297,14 +349,23 @@ processes writing the same directory can lose updates. In a test with four
 processes each adding 1 to a shared counter 40 times, about half of the additions
 were lost. Use the SQLite adapter when more than one process writes. The adapter
 does not `fsync`, so a power failure shortly after a write can lose it.
-`subscribe` reports changes made through adapters in this process.
+`subscribe` reports changes made through adapters in this process and, when the
+file system can watch a directory (`nodeFileSystem()` can), files that another
+process or a person changes, writes, replaces or deletes. It stays quiet for a
+file that did not change and for half-written files, and the folder is watched only
+while someone is subscribed. Hearing about another process's write does not make
+two writers safe; the warning above still applies.
 
 #### JSON file storage
 
 For small amounts of data that a person might open and edit, such as settings,
 use `jsonFileAdapter` from the optional `/json-file` entry point. It keeps every
 key in one JSON file. Like the file adapter, it imports no file system module:
-pass `nodeFileSystem()` from `/file/node`, or your own `FileSystemLike`.
+pass `nodeFileSystem()` from `/file/node`, or your own `FileSystemLike`. Writes go
+to a temporary file that is renamed over the real one; if your `FileSystemLike`
+has `writeNewFile` (an exclusive create, `O_CREAT | O_EXCL`, which `nodeFileSystem`
+provides), the temporary name is random and a name that already exists, a symbolic
+link included, is skipped instead of written through.
 
 ```ts
 import { nodeFileSystem } from '@richardmcquiston01/storage-adapters/file/node';
@@ -463,7 +524,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 

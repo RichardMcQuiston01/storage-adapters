@@ -1,0 +1,12 @@
+# Keeps the commit SHAs that the workflows pin their actions to up to date. Each
+# update arrives as a pull request, so a moved tag can never change what CI or the
+# release job runs without a commit here. The pinned Bun and Deno versions in the
+# workflows are bumped by hand when the tooling is upgraded (see CLAUDE.md).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci

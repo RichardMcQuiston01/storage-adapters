@@ -1,6 +1,6 @@
 {
   "name": "@richardmcquiston01/storage-adapters",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value contract with typed errors and revisions, composable wrappers (prefix, fallback, retry, cache, encoding), and a generic persistence helper with conflict handling. No I/O in the core.",
   "keywords": [
     "typescript",
@@ -100,6 +100,16 @@
         "default": "./dist/s3.cjs"
       }
     },
+    "./redis": {
+      "import": {
+        "types": "./dist/redis.d.ts",
+        "default": "./dist/redis.js"
+      },
+      "require": {
+        "types": "./dist/redis.d.cts",
+        "default": "./dist/redis.cjs"
+      }
+    },
     "./file": {
       "import": {
         "types": "./dist/file.d.ts",
@@ -172,6 +182,9 @@
       "s3": [
         "./dist/s3.d.ts"
       ],
+      "redis": [
+        "./dist/redis.d.ts"
+      ],
       "file": [
         "./dist/file.d.ts"
       ],
@@ -224,9 +237,11 @@
     "fake-indexeddb": "^6.2.5",
     "globals": "^17.13.0",
     "ini": "^7.0.0",
+    "ioredis": "^6.0.0",
     "mysql2": "^3.24.6",
     "pg": "^8.23.1",
     "prettier": "^3.9.9",
+    "redis": "^6.3.0",
     "tsup": "^8.5.1",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.71.1",

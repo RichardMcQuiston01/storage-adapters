@@ -13,10 +13,23 @@ export function nodeFileSystem(): FileSystemLike {
   return {
     readFile: (path) => readFile(path, 'utf8'),
     writeFile: (path, data) => writeFile(path, data, 'utf8'),
+    // 'wx' is O_CREAT | O_EXCL: it fails if anything is there, a symbolic link included.
+    writeNewFile: (path, data) =>
+      writeFile(path, data, { encoding: 'utf8', flag: 'wx' }),
     rename: (fromPath, toPath) => rename(fromPath, toPath),
     remove: (path) => rm(path, { force: true }),
     mkdir: async (path) => {
       await mkdir(path, { recursive: true });
+    },
+    watchDirectory: (directory, onChange) => {
+      const watcher = watch(directory, (_event, filename) => {
+        onChange(filename === null ? null : String(filename));
+      });
+      watcher.on('error', () => {});
+      watcher.unref(); // A watcher alone should not keep the program running.
+      return () => {
+        watcher.close();
+      };
     },
     watch: (path, onChange) => {
       // Watch the folder, not the file: a file replaced by a rename (ours, or an

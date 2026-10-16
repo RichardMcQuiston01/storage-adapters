@@ -16,10 +16,10 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run lint
@@ -33,13 +33,13 @@ jobs:
   deno:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
-      - uses: denoland/setup-deno@v2
+          bun-version: 1.4.2
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
-          deno-version: v2.x
+          deno-version: 2.9.6
       - run: bun install --frozen-lockfile
       - run: bun run build
       - run: bun run test:deno
@@ -48,16 +48,16 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - run: bun run test
       - run: bun run build
       - run: bun run smoke:dist
 
-  # The PostgreSQL and MySQL adapters, against real servers. The default test run
+  # The PostgreSQL, MySQL and Redis adapters, against real servers. The default test run
   # skips these (it uses PGlite for PostgreSQL and has no MySQL), so this job sets
   # the connection strings that switch them on.
   databases:
@@ -87,16 +87,26 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
+      TEST_REDIS_URL: redis://127.0.0.1:6379
       TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/adapters
       TEST_MYSQL_URL: mysql://root:mysql@127.0.0.1:3306/adapters
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      - run: bun test test/databases.test.ts test/postgres.test.ts test/mysql.test.ts
+      - run: bun test test/databases.test.ts test/postgres.test.ts test/mysql.test.ts test/redis.test.ts
 
   # The S3 adapter, against an S3-compatible server. The default test run skips these
   # (it uses an in-memory store). moto implements S3's conditional writes, so it
@@ -106,10 +116,10 @@ jobs:
     env:
       TEST_S3_ENDPOINT: http://127.0.0.1:5000
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.4.2
       # A virtual environment keeps moto away from the runner's system Python packages
       # (its pyOpenSSL clashes with the newer cryptography that moto installs).
       - run: |

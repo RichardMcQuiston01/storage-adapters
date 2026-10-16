@@ -38,3 +38,7 @@ adapter layer. Extracted from `dashboard-widgets-toolkit`
   tag `main` with `vX.Y.Z` matching `package.json`. The Release workflow
   (secret `NPM_TOKEN`) builds, tests and publishes with provenance.
 - CI runs on PRs and pushes to `dev`/`main`.
+- Workflows pin every action to a full commit SHA (with the version in a
+  comment) and Bun and Deno to exact versions, so nothing CI or the release job
+  runs changes without a commit. Dependabot proposes the action SHA bumps; bump
+  the Bun and Deno versions by hand when you upgrade the tooling.

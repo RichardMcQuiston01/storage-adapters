@@ -111,3 +111,63 @@ export function fakeFileSystem(withWatch = true): FakeFileSystem {
   }
   return fake;
 }
+
+/**
+ * Gives the fake an exclusive create like Node's `wx`: it rejects with `EEXIST`
+ * when anything is already at the path. Off by default, so tests that count plain
+ * writes are unchanged.
+ */
+export function withExclusiveCreate(fake: FakeFileSystem): FakeFileSystem {
+  fake.writeNewFile = (path, data) => {
+    fake.calls.push(`writeNewFile ${path}`);
+    if (fake.failures.writeFile !== undefined) {
+      return Promise.reject(fake.failures.writeFile);
+    }
+    if (fake.files.has(path)) {
+      return Promise.reject(errorWithCode('EEXIST'));
+    }
+    fake.files.set(path, data);
+    return Promise.resolve();
+  };
+  return fake;
+}
+
+/** A fake file system that can also watch a directory, like `fs.watch` on a folder. */
+export interface DirectoryWatchingFileSystem extends FakeFileSystem {
+  readonly directoryWatchers: Set<{
+    directory: string;
+    onChange: (name: string | null) => void;
+  }>;
+  /** Says that something in the directory changed (`null` when it cannot say what). */
+  fireDirectory(directory: string, name: string | null): void;
+}
+
+export function withDirectoryWatch(
+  fake: FakeFileSystem
+): DirectoryWatchingFileSystem {
+  const directoryWatchers = new Set<{
+    directory: string;
+    onChange: (name: string | null) => void;
+  }>();
+  const watching = fake as DirectoryWatchingFileSystem;
+  Object.assign(watching, {
+    directoryWatchers,
+    fireDirectory: (directory: string, name: string | null): void => {
+      for (const watcher of [...directoryWatchers]) {
+        if (watcher.directory === directory) {
+          watcher.onChange(name);
+        }
+      }
+    },
+  });
+  watching.watchDirectory = (directory, onChange) => {
+    fake.calls.push(`watchDirectory ${directory}`);
+    const watcher = { directory, onChange };
+    directoryWatchers.add(watcher);
+    return () => {
+      fake.calls.push(`unwatchDirectory ${directory}`);
+      directoryWatchers.delete(watcher);
+    };
+  };
+  return watching;
+}
