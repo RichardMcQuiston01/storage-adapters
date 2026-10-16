@@ -111,3 +111,23 @@ export function fakeFileSystem(withWatch = true): FakeFileSystem {
   }
   return fake;
 }
+
+/**
+ * Gives the fake an exclusive create like Node's `wx`: it rejects with `EEXIST`
+ * when anything is already at the path. Off by default, so tests that count plain
+ * writes are unchanged.
+ */
+export function withExclusiveCreate(fake: FakeFileSystem): FakeFileSystem {
+  fake.writeNewFile = (path, data) => {
+    fake.calls.push(`writeNewFile ${path}`);
+    if (fake.failures.writeFile !== undefined) {
+      return Promise.reject(fake.failures.writeFile);
+    }
+    if (fake.files.has(path)) {
+      return Promise.reject(errorWithCode('EEXIST'));
+    }
+    fake.files.set(path, data);
+    return Promise.resolve();
+  };
+  return fake;
+}

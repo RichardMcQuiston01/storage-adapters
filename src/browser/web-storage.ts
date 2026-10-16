@@ -108,6 +108,13 @@ function failureFor<T>(
  * revision, so `set` with `ifRevision` reports `conflict` when another document
  * wrote first, and `subscribe` reports changes made by other documents. Nothing
  * throws: every failure is a `StoreResult`.
+ *
+ * Web Storage has no compare-and-set, so the revision check is not atomic between
+ * tabs: two tabs can both read the same revision and both write. Within one tab it
+ * is exact. After writing, the adapter reads the key back and reports `conflict` if
+ * another tab's write landed after its own, which narrows the gap but does not close
+ * it. For writers that must never overwrite each other, use `indexedDbAdapter`,
+ * whose check and write run in one transaction.
  */
 export function webStorageAdapter(
   name: WebStorageName,
@@ -215,7 +222,25 @@ export function webStorageAdapter(
       }
       try {
         const envelope: Envelope = { r: revision, v: value };
-        storage.setItem(key, JSON.stringify(envelope));
+        const written: string = JSON.stringify(envelope);
+        storage.setItem(key, written);
+        // Web Storage has no compare-and-set, so another tab may have written
+        // between our read and our write. If what is stored is not what we just
+        // wrote, someone else's write landed after ours and ours is lost. This
+        // narrows the gap; it cannot close it (see the note on the adapter).
+        const stored: string | null = storage.getItem(key);
+        if (stored !== written) {
+          const winner: Envelope | null | undefined = parseEnvelope(stored);
+          return Promise.resolve(
+            failure(
+              'conflict',
+              key,
+              winner === null || winner === undefined
+                ? 'was changed by another tab while it was being written'
+                : `was changed by another tab while it was being written; it now holds revision ${winner.r}`
+            )
+          );
+        }
       } catch (error: unknown) {
         return Promise.resolve(
           failure(

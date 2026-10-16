@@ -8,6 +8,8 @@ import type { StoredValue, StoreErrorCode, StoreResult } from './storage.js';
 /** Who to tell when a key changes through this adapter. */
 export interface ChangeListeners {
   notify(key: string, stored: StoredValue | null): void;
+  /** True while someone is subscribed to this key. */
+  has(key: string): boolean;
   subscribe(
     key: string,
     onChange: (stored: StoredValue | null) => void
@@ -20,6 +22,7 @@ export function createChangeListeners(): ChangeListeners {
     Set<(stored: StoredValue | null) => void>
   >();
   return {
+    has: (key) => listeners.has(key),
     notify(key, stored) {
       for (const listener of listeners.get(key) ?? []) {
         try {

@@ -10,6 +10,7 @@ import {
   failedWithFor,
   failureFor,
   withLock,
+  writeTemporaryFile,
 } from '../file/shared.js';
 import type {
   StorageAdapter,
@@ -81,8 +82,6 @@ function sameStored(
       left.revision === right.revision)
   );
 }
-
-let temporaryCounter = 0;
 
 export function documentFileAdapter(
   options: DocumentFileOptions
@@ -166,10 +165,13 @@ export function documentFileAdapter(
       left < right ? -1 : left > right ? 1 : 0
     );
     const text: string = codec.stringify(Object.fromEntries(sorted));
-    temporaryCounter += 1;
-    const temporaryPath = `${path}.${Math.random().toString(36).slice(2)}${temporaryCounter}.tmp`;
+    // Only a temporary file this call created is ever removed.
+    const temporaryPath: string = await writeTemporaryFile(
+      fileSystem,
+      path,
+      text
+    );
     try {
-      await fileSystem.writeFile(temporaryPath, text);
       await fileSystem.rename(temporaryPath, path);
     } catch (error: unknown) {
       try {
@@ -302,14 +304,11 @@ export function documentFileAdapter(
         return abortedResult;
       }
       try {
-        const read: DocumentRead = options.cache
-          ? await load()
-          : await readDocument();
+        // Uncached reads go through the same queue: one that finished after a write
+        // must not put the document back as it was before that write.
+        const read: DocumentRead = await load();
         if (read.kind === 'corrupt') {
           return corruptDocument(key, read.detail);
-        }
-        if (!options.cache) {
-          adopt(read.entries);
         }
         const stored = storedOf(read.entries, key);
         if (stored === undefined) {

@@ -14,6 +14,9 @@ import {
   type StoredValue,
 } from './storage.js';
 
+/** Envelope fields that hold metadata, so the value cannot use them. */
+const RESERVED_FIELDS: readonly string[] = ['v', 'savedAt'];
+
 /** Default largest serialized value (bytes). */
 export const DEFAULT_MAX_BYTES = 64 * 1024;
 
@@ -38,7 +41,10 @@ export interface PersistenceOptions<T> {
   readonly serialize?: (value: T) => unknown;
   /** Envelope version written. Newer stored versions are refused. Default 1. */
   readonly version?: number;
-  /** The envelope field that holds the value. Default `'value'`. */
+  /**
+   * The envelope field that holds the value. Default `'value'`. `'v'` and
+   * `'savedAt'` are the envelope's own and make `createPersistence` throw.
+   */
   readonly field?: string;
   /** What the value is called in error messages. Default `'value'`. */
   readonly label?: string;
@@ -116,6 +122,13 @@ export function createPersistence<T>(
 ): Persistence<T> {
   const version: number = options.version ?? 1;
   const field: string = options.field ?? 'value';
+  if (RESERVED_FIELDS.includes(field)) {
+    // A programmer error, found when the persistence is made rather than at the
+    // first save, which would otherwise store an envelope nothing can read back.
+    throw new Error(
+      `createPersistence cannot use "${field}" as the envelope field: it holds the envelope's own ${field === 'v' ? 'version' : 'timestamp'}. Use another name.`
+    );
+  }
   const label: string = options.label ?? 'value';
   const maxBytes: number = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const policy: ConflictPolicy<T> = options.onConflict ?? 'ask';
@@ -267,11 +280,14 @@ export function createPersistence<T>(
   const write = async (
     key: string,
     value: T,
-    force: boolean
+    force: boolean,
+    merged = false
   ): Promise<StoreResult<Saved<T>>> => {
     const text = encode(value, key);
     if (!text.ok) return text;
     const known: string | undefined = revisions.get(key);
+    // Set before the write so the change notice it causes is recognised as ours.
+    const previouslyWritten: string | undefined = lastWritten.get(key);
     lastWritten.set(key, text.value);
     const stored = await guarded(key, 'save', () =>
       adapter.set(key, text.value, {
@@ -279,6 +295,11 @@ export function createPersistence<T>(
         ...(force || known === undefined ? {} : { ifRevision: known }),
       })
     );
+    if (!stored.ok) {
+      // Nothing was stored, so what the echo filter remembers must not change.
+      if (previouslyWritten === undefined) lastWritten.delete(key);
+      else lastWritten.set(key, previouslyWritten);
+    }
     if (stored.ok) {
       if (stored.value.revision !== undefined) {
         revisions.set(key, stored.value.revision);
@@ -311,18 +332,19 @@ export function createPersistence<T>(
     if (policy === 'overwrite') return write(key, value, true);
     if (policy === 'keep-theirs') return asResult('kept-theirs');
     if (policy === 'ask') return asResult('conflict');
-    let merged: T;
+    // A merge function gets one go: if the merged value conflicts too, it is not
+    // merged again, and the caller is told what is stored now.
+    if (merged) return asResult('conflict');
+    let mergedValue: T;
     try {
-      merged = policy(value, theirValue);
+      mergedValue = policy(value, theirValue);
     } catch (cause) {
       return failure(
         'invalid',
         `Could not save "${key}": the conflict merge function threw ${describeUnknownError(cause)}`
       );
     }
-    const second = await write(key, merged, false);
-    if (second.ok && second.value.outcome === 'saved') return second;
-    return second.ok ? asResult('conflict') : second;
+    return write(key, mergedValue, false, true);
   };
 
   const drain = async (key: string, first: PendingSave<T>): Promise<void> => {
@@ -367,7 +389,7 @@ export function createPersistence<T>(
         if (queued !== undefined) {
           // Newest wins: this value replaces the one that hasn't started.
           queued.value = value;
-          queued.force = queued.force || force;
+          queued.force = force; // The save whose value is written decides.
           queued.waiters.push(resolve);
           return;
         }
@@ -387,8 +409,16 @@ export function createPersistence<T>(
         );
       }
       const remove = adapter.remove.bind(adapter);
-      revisions.delete(key);
-      return guarded(key, 'remove', () => remove(key, { signal }));
+      const removed = await guarded(key, 'remove', () =>
+        remove(key, { signal })
+      );
+      // Forget the revision only once the row is gone. If the removal failed it is
+      // still stored, and the next save must still check against what we last saw.
+      if (removed.ok) {
+        revisions.delete(key);
+        lastWritten.delete(key);
+      }
+      return removed;
     },
     watch(key, onChange) {
       const stop: (() => void) | undefined = adapter.subscribe?.(

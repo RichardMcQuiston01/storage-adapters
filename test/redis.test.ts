@@ -63,6 +63,8 @@ interface FakeRedis extends RedisClientLike, RedisSubscriberLike {
   /** Makes the next `subscribe` reject with this error. */
   failSubscribe: Error | null;
   readonly activeSubscriptions: () => number;
+  /** Publishes text on a channel, as any client allowed to PUBLISH could. */
+  publishRaw(channel: string, message: string): void;
 }
 
 /** Behaves like the two Lua scripts and `HMGET`, and delivers Pub/Sub messages. */
@@ -70,16 +72,20 @@ function fakeRedis(): FakeRedis {
   const hashes = new Map<string, { r: string; v: string }>();
   const commands: string[][] = [];
   const channels = new Map<string, Set<(message: string) => void>>();
-  const publish = (channel: string, message: object): void => {
+  const publishRaw = (channel: string, message: string): void => {
     for (const listener of channels.get(channel) ?? []) {
-      listener(JSON.stringify(message));
+      listener(message);
     }
+  };
+  const publish = (channel: string, message: object): void => {
+    publishRaw(channel, JSON.stringify(message));
   };
   const fake: FakeRedis = {
     hashes,
     commands,
     failNext: null,
     failSubscribe: null,
+    publishRaw,
     activeSubscriptions: () =>
       [...channels.values()].reduce((sum, set) => sum + set.size, 0),
     command: (args) => {
@@ -104,12 +110,12 @@ function fakeRedis(): FakeRedis {
         }
         const revision = String(Number(current?.r ?? '0') + 1);
         hashes.set(key, { r: revision, v: value });
-        publish(channel, { o: origin, k: callerKey, r: revision, v: value });
+        publish(channel, { o: origin, k: callerKey });
         return Promise.resolve([1, revision]);
       }
       const [channel = '', origin, callerKey] = rest;
       hashes.delete(key);
-      publish(channel, { o: origin, k: callerKey, v: null });
+      publish(channel, { o: origin, k: callerKey });
       return Promise.resolve(1);
     },
     subscribe: (channel, onMessage) => {
@@ -161,6 +167,8 @@ async function removeFrom(
   assert.ok(adapter.remove, 'the adapter should implement remove');
   return adapter.remove(key, options);
 }
+
+const tick = (): Promise<void> => new Promise((done) => setImmediate(done));
 
 function redisError(message: string): Error {
   return new Error(message);
@@ -359,7 +367,9 @@ void describe('redisAdapter against an in-memory Redis', () => {
       subscribeTo(listening, 'k', (stored) => heard.push(stored));
       await Promise.resolve();
       expectOk(await writing.set('k', 'from elsewhere', { signal }));
+      await tick();
       expectOk(await removeFrom(writing, 'k', { signal }));
+      await tick();
       assert.deepEqual(heard, [
         { value: 'from elsewhere', revision: '1' },
         null,
@@ -373,7 +383,111 @@ void describe('redisAdapter against an in-memory Redis', () => {
       subscribeTo(adapter, 'k', (stored) => heard.push(stored));
       await Promise.resolve();
       expectOk(await adapter.set('k', 'mine', { signal }));
+      await tick();
       assert.equal(heard.length, 1);
+    });
+
+    void it('never reports a value that was only published, only what Redis holds', async () => {
+      const redis = fakeRedis();
+      const listening = redisAdapter({
+        client: redis,
+        subscriber: redis,
+        prefix: 'p:',
+      });
+      const heard: (StoredValue | null)[] = [];
+      subscribeTo(listening, 'k', (stored) => heard.push(stored));
+      await Promise.resolve();
+      // Anyone allowed to PUBLISH can send this; nothing is stored under the key.
+      redis.publishRaw(
+        'p:changes',
+        JSON.stringify({ k: 'k', r: '9', v: 'forged' })
+      );
+      await tick();
+      assert.deepEqual(heard, [null], 'a re-read finds nothing stored');
+      assert.ok(
+        redis.commands.some((command) => command[0] === 'HMGET'),
+        'the listener read the hash'
+      );
+    });
+
+    void it('puts only the key on the channel, never the value', async () => {
+      const redis = fakeRedis();
+      const seen: string[] = [];
+      const spy: RedisClientLike = {
+        command: (args) => {
+          // The scripts publish from inside Redis; check what they are told to send.
+          seen.push(args.join(' '));
+          return redis.command(args);
+        },
+      };
+      const adapter = redisAdapter({ client: spy });
+      expectOk(await adapter.set('k', 'SECRET VALUE', { signal }));
+      const script = redis.commands[0]?.[1] ?? '';
+      assert.match(script, /cjson\.encode\(\{o = ARGV\[6\], k = ARGV\[7\]\}\)/);
+      assert.doesNotMatch(script, /v = ARGV\[1\]/);
+    });
+
+    void it('does not read keys nobody is subscribed to', async () => {
+      const redis = fakeRedis();
+      const listening = redisAdapter({ client: redis, subscriber: redis });
+      subscribeTo(listening, 'wanted', () => undefined);
+      await Promise.resolve();
+      redis.publishRaw('storage:changes', JSON.stringify({ k: 'unwanted' }));
+      await tick();
+      assert.equal(
+        redis.commands.filter((command) => command[0] === 'HMGET').length,
+        0
+      );
+    });
+
+    void it('tries to listen again after the subscriber failed, while listeners remain', async () => {
+      const redis = fakeRedis();
+      redis.failSubscribe = new Error('connection closed');
+      const problems: string[] = [];
+      const listening = redisAdapter({
+        client: redis,
+        subscriber: redis,
+        subscriberRetryMs: 5,
+        onSubscriberError: (message) => problems.push(message),
+      });
+      const writing = redisAdapter({ client: redis });
+      const heard: (StoredValue | null)[] = [];
+      const stop = subscribeTo(listening, 'k', (stored) => heard.push(stored));
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      assert.equal(problems.length, 1);
+      assert.equal(redis.activeSubscriptions(), 1, 'listening again');
+      // No new subscribe call: the same listener now hears another process.
+      expectOk(await writing.set('k', 'from elsewhere', { signal }));
+      await tick();
+      assert.deepEqual(heard, [{ value: 'from elsewhere', revision: '1' }]);
+      stop();
+      await tick();
+      assert.equal(redis.activeSubscriptions(), 0);
+    });
+
+    void it('stops retrying when the last listener goes, and does not stack a second subscription', async () => {
+      const redis = fakeRedis();
+      redis.failSubscribe = new Error('down');
+      const listening = redisAdapter({
+        client: redis,
+        subscriber: redis,
+        subscriberRetryMs: 5,
+        onSubscriberError: () => undefined,
+      });
+      const stop = subscribeTo(listening, 'k', () => undefined);
+      await tick();
+      stop();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      assert.equal(
+        redis.activeSubscriptions(),
+        0,
+        'no retry after the last stop'
+      );
+      const again = subscribeTo(listening, 'k', () => undefined);
+      subscribeTo(listening, 'j', () => undefined);
+      await tick();
+      assert.equal(redis.activeSubscriptions(), 1);
+      again();
     });
 
     void it('only reports the key that was subscribed to', async () => {
@@ -694,6 +808,7 @@ void describe('redisAdapter against a real Redis server', () => {
         );
         await new Promise((resolve) => setTimeout(resolve, 100));
         expectOk(await writing.set('k', 'hello', { signal }));
+        await waitFor(() => heard.length >= 1);
         expectOk(await removeFrom(writing, 'k', { signal }));
         await waitFor(() => heard.length >= 2);
         assert.deepEqual(heard, [{ value: 'hello', revision: '1' }, null]);
