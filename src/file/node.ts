@@ -21,6 +21,16 @@ export function nodeFileSystem(): FileSystemLike {
     mkdir: async (path) => {
       await mkdir(path, { recursive: true });
     },
+    watchDirectory: (directory, onChange) => {
+      const watcher = watch(directory, (_event, filename) => {
+        onChange(filename === null ? null : String(filename));
+      });
+      watcher.on('error', () => {});
+      watcher.unref(); // A watcher alone should not keep the program running.
+      return () => {
+        watcher.close();
+      };
+    },
     watch: (path, onChange) => {
       // Watch the folder, not the file: a file replaced by a rename (ours, or an
       // editor's) is a new file, and a watcher on the old one would go quiet.

@@ -131,3 +131,43 @@ export function withExclusiveCreate(fake: FakeFileSystem): FakeFileSystem {
   };
   return fake;
 }
+
+/** A fake file system that can also watch a directory, like `fs.watch` on a folder. */
+export interface DirectoryWatchingFileSystem extends FakeFileSystem {
+  readonly directoryWatchers: Set<{
+    directory: string;
+    onChange: (name: string | null) => void;
+  }>;
+  /** Says that something in the directory changed (`null` when it cannot say what). */
+  fireDirectory(directory: string, name: string | null): void;
+}
+
+export function withDirectoryWatch(
+  fake: FakeFileSystem
+): DirectoryWatchingFileSystem {
+  const directoryWatchers = new Set<{
+    directory: string;
+    onChange: (name: string | null) => void;
+  }>();
+  const watching = fake as DirectoryWatchingFileSystem;
+  Object.assign(watching, {
+    directoryWatchers,
+    fireDirectory: (directory: string, name: string | null): void => {
+      for (const watcher of [...directoryWatchers]) {
+        if (watcher.directory === directory) {
+          watcher.onChange(name);
+        }
+      }
+    },
+  });
+  watching.watchDirectory = (directory, onChange) => {
+    fake.calls.push(`watchDirectory ${directory}`);
+    const watcher = { directory, onChange };
+    directoryWatchers.add(watcher);
+    return () => {
+      fake.calls.push(`unwatchDirectory ${directory}`);
+      directoryWatchers.delete(watcher);
+    };
+  };
+  return watching;
+}
