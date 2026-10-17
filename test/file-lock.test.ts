@@ -244,15 +244,20 @@ void describe('withFileLock', () => {
     }
   });
 
-  void it('passes the error on when the lock keeps being denied, as a folder that cannot be written does', async () => {
+  void it('passes the error on when the lock keeps being denied for the whole timeout, as a folder that cannot be written does', async () => {
     const fake = withExclusiveCreate(fakeFileSystem(false));
     fake.failures.writeFile = errorWithCode('EACCES');
-    const lock = lockWith();
+    const lock = lockWith(
+      () => new Promise((resolve) => setTimeout(resolve, 5)),
+      {
+        timeoutMs: 40,
+      }
+    );
     await assert.rejects(
       () => withFileLock(fake, LOCK, lock, signal, () => Promise.resolve()),
       (error: unknown) => (error as { code?: string }).code === 'EACCES'
     );
-    assert.equal(lock.waits.length, 40, 'tried a bounded number of times');
+    assert.ok(lock.waits.length >= 2, 'it waited before giving up');
   });
 
   void it('passes on any other error from creating the lock at once', async () => {

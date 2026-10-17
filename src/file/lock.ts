@@ -33,10 +33,10 @@ const DEFAULT_RETRY_MS = 25;
  * On Windows, creating a file that another process has just deleted, while that
  * process or a reader still has it open, fails with EPERM or EACCES until the last
  * handle closes, instead of EEXIST. That is contention, so it is waited out; but a
- * folder that really cannot be written gives the same codes, so after this many
- * tries in a row the error is passed on as it is.
+ * folder that really cannot be written gives the same codes, so after this long (or
+ * the lock timeout, if that is shorter) the error is passed on as it is.
  */
-const MAX_DENIED_TRIES = 40;
+const MAX_DENIED_MS = 5000;
 
 function lockError(code: string, message: string): Error {
   return Object.assign(new Error(message), { code });
@@ -85,7 +85,7 @@ export async function withFileLock<T>(
   const started: number = Date.now();
   let garbageSince: number | null = null;
   let waitMs: number = firstWaitMs;
-  let deniedTries = 0;
+  let deniedSince: number | null = null;
 
   for (;;) {
     try {
@@ -98,8 +98,8 @@ export async function withFileLock<T>(
     } catch (error: unknown) {
       const code: string = errorCodeOf(error);
       if (code === 'EPERM' || code === 'EACCES') {
-        deniedTries += 1;
-        if (deniedTries > MAX_DENIED_TRIES) {
+        deniedSince ??= Date.now();
+        if (Date.now() - deniedSince > Math.min(timeoutMs, MAX_DENIED_MS)) {
           throw error;
         }
         if (signal.aborted) {
@@ -115,7 +115,7 @@ export async function withFileLock<T>(
       if (code !== 'EEXIST') {
         throw error;
       }
-      deniedTries = 0;
+      deniedSince = null;
     }
     // Someone holds it. If it is old, or has been unreadable for as long, it was
     // left behind by a process that died: break it, but only if it is still the
