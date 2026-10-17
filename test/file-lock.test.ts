@@ -260,6 +260,60 @@ void describe('withFileLock', () => {
     assert.ok(lock.waits.length >= 2, 'it waited before giving up');
   });
 
+  void it('waits out EPERM when reading a lock file that is being deleted', async () => {
+    const fake = withExclusiveCreate(fakeFileSystem(false));
+    fake.files.set(LOCK, JSON.stringify({ token: 'other', at: Date.now() }));
+    const realRead = fake.readFile.bind(fake);
+    let denied = 0;
+    fake.readFile = (path) => {
+      if (path === LOCK && denied < 3) {
+        denied += 1;
+        return Promise.reject(errorWithCode('EPERM'));
+      }
+      return realRead(path);
+    };
+    const lock = lockWith(() => {
+      if (denied === 3) fake.files.delete(LOCK); // The other process is done.
+    });
+    await withFileLock(fake, LOCK, lock, signal, () => Promise.resolve());
+    assert.ok(lock.waits.length >= 3);
+    assert.deepEqual(lockFiles(fake), []);
+  });
+
+  void it('passes the error on when reading the lock keeps being denied for the whole timeout', async () => {
+    const fake = withExclusiveCreate(fakeFileSystem(false));
+    fake.files.set(LOCK, JSON.stringify({ token: 'other', at: Date.now() }));
+    fake.failures.readFile = errorWithCode('EACCES');
+    const lock = lockWith(
+      () => new Promise((resolve) => setTimeout(resolve, 5)),
+      { timeoutMs: 40 }
+    );
+    await assert.rejects(
+      () => withFileLock(fake, LOCK, lock, signal, () => Promise.resolve()),
+      (error: unknown) => (error as { code?: string }).code === 'EACCES'
+    );
+  });
+
+  void it('does not fail when breaking a stale lock is denied because someone else is deleting it', async () => {
+    const fake = withExclusiveCreate(fakeFileSystem(false));
+    fake.files.set(
+      LOCK,
+      JSON.stringify({ token: 'dead', at: Date.now() - 60_000 })
+    );
+    const realRemove = fake.remove.bind(fake);
+    let denied = 0;
+    fake.remove = (path) => {
+      if (path === LOCK && denied < 2) {
+        denied += 1;
+        return Promise.reject(errorWithCode('EPERM'));
+      }
+      return realRemove(path);
+    };
+    await withFileLock(fake, LOCK, lockWith(), signal, () => Promise.resolve());
+    assert.equal(denied, 2);
+    assert.deepEqual(lockFiles(fake), []);
+  });
+
   void it('passes on any other error from creating the lock at once', async () => {
     const fake = withExclusiveCreate(fakeFileSystem(false));
     fake.failures.writeFile = errorWithCode('ENOSPC');
