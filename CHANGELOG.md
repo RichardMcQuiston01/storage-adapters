@@ -1,11 +1,5 @@
 # CHANGELOG
 
-## 0.10.1
-
-### Patch Changes
-
-- `nodeFileSystem()` retries a rename that fails with `EPERM`, `EACCES` or `EBUSY` for up to about half a second before giving up. On Windows, replacing a file fails this way while another process has it open, which made a write fail when a second process was reading the same file.
-
 ## 0.10.0
 
 ### Minor Changes
@@ -13,6 +7,10 @@
 - 3c00d43: Add a REST adapter as the optional `@richardmcquiston01/storage-adapters/rest` entry point. `restAdapter({ baseUrl, fetch, headers?, name? })` keeps each key behind a small JSON API (`GET`, `PUT` and `DELETE` on `{baseUrl}/{key}`, and `GET {baseUrl}?prefix=` for `list`), with the revision in the JSON or an `ETag` and `If-Match` for `ifRevision`. A server that answers 404 or 412 for a key with nothing stored is asked again with `If-None-Match: *`, so the key is created as the contract says. You pass in the `fetch`, so the package still makes no request itself; `headers` can be a function, to refresh a token. HTTP statuses map to `forbidden`, `quota`, `invalid` and `unavailable`, a reply that is not the documented shape is `corrupt`, and messages carry the status and the server's own words. `subscribe` reports changes made through the same adapter.
 - 3c00d43: Add an optional `list(prefix, { signal })` to `StorageAdapter`: it resolves the keys that start with `prefix` (`''` for all), sorted in code-unit order, as plain text (never a pattern), to list or clear a namespace. `memoryAdapter`, the browser adapters, IndexedDB, SQLite, PostgreSQL, MySQL, Redis (`SCAN`), S3 (`ListObjectsV2`), the file adapter and the JSON, YAML and INI adapters all have it, and the wrappers pass it through (`withPrefix` strips its prefix, `withFallback` merges both stores, `withRetry` retries it, `withLogging` reports it as operation `list` with the prefix as `key`). An adapter that cannot list answers `invalid` and says what it lacks. New optional pieces of the interfaces they sit on: `FileSystemLike.listFiles` (`nodeFileSystem()` has it), `SqliteStatementLike.all`, `WebStorageLike.length` and `key()`, `IdbObjectStoreLike.getAllKeys`, `ObjectStoreLike.listKeys` and `AwsSdkCommands.ListObjectsV2Command`. Also exports `compareKeys` and `keysWithPrefix` for adapters of your own.
 - 6439fd2: Add cross-process locking to the file adapters. Pass `lock: { sleep, staleMs?, timeoutMs?, retryMs? }` to `fileAdapter`, `jsonFileAdapter`, `yamlFileAdapter` or `iniFileAdapter` and every write and removal first takes a lock file (`<key>.json.lock` beside the key's file, or `<file>.lock` beside the document) made with the file system's exclusive create, so several processes can share one directory or document without losing updates, and `ifRevision` is checked against what another process just wrote. With four real processes each adding to a shared counter 25 times, 66 of 100 additions were lost without the lock and none with it. A lock that cannot be had within `timeoutMs` gives `unavailable` naming the lock file and writes nothing; a lock older than `staleMs` is taken to be left by a dead process and is broken, and a lock is only released if it is still the one that write took. You pass `sleep`, so the library still has no timers. It needs a `FileSystemLike` with `writeNewFile` (`nodeFileSystem()` has it) and a file system where exclusive create is atomic, and it is advisory: it protects writers that all use it. Without `lock` nothing changes.
+
+### Patch Changes
+
+- `nodeFileSystem()` retries a rename that fails with `EPERM`, `EACCES` or `EBUSY` for up to about half a second before giving up. On Windows, replacing a file fails this way while another process has it open, which made a write fail when a second process was reading the same file.
 
 ## 0.9.0
 
