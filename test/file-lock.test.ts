@@ -226,14 +226,44 @@ void describe('withFileLock', () => {
     );
   });
 
-  void it('passes on any other error from creating the lock', async () => {
+  void it('waits out EPERM and EACCES from creating the lock, which Windows gives while a deleted lock file is still open', async () => {
+    for (const code of ['EPERM', 'EACCES']) {
+      const fake = withExclusiveCreate(fakeFileSystem(false));
+      const create = fake.writeNewFile?.bind(fake);
+      let denied = 0;
+      fake.writeNewFile = (path, data) => {
+        if (denied < 3) {
+          denied += 1;
+          return Promise.reject(errorWithCode(code));
+        }
+        return create?.(path, data) ?? Promise.resolve();
+      };
+      const lock = lockWith();
+      await withFileLock(fake, LOCK, lock, signal, () => Promise.resolve());
+      assert.equal(lock.waits.length, 3, code);
+    }
+  });
+
+  void it('passes the error on when the lock keeps being denied, as a folder that cannot be written does', async () => {
     const fake = withExclusiveCreate(fakeFileSystem(false));
     fake.failures.writeFile = errorWithCode('EACCES');
+    const lock = lockWith();
     await assert.rejects(
-      () =>
-        withFileLock(fake, LOCK, lockWith(), signal, () => Promise.resolve()),
+      () => withFileLock(fake, LOCK, lock, signal, () => Promise.resolve()),
       (error: unknown) => (error as { code?: string }).code === 'EACCES'
     );
+    assert.equal(lock.waits.length, 40, 'tried a bounded number of times');
+  });
+
+  void it('passes on any other error from creating the lock at once', async () => {
+    const fake = withExclusiveCreate(fakeFileSystem(false));
+    fake.failures.writeFile = errorWithCode('ENOSPC');
+    const lock = lockWith();
+    await assert.rejects(
+      () => withFileLock(fake, LOCK, lock, signal, () => Promise.resolve()),
+      (error: unknown) => (error as { code?: string }).code === 'ENOSPC'
+    );
+    assert.equal(lock.waits.length, 0);
   });
 });
 
