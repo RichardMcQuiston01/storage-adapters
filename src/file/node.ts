@@ -16,6 +16,43 @@ import {
 
 import type { FileSystemLike } from './file.js';
 
+const RENAME_RETRY_CODES: ReadonlySet<string> = new Set([
+  'EPERM',
+  'EACCES',
+  'EBUSY',
+]);
+const RENAME_ATTEMPTS = 10;
+const RENAME_WAIT_MS = 10;
+
+/**
+ * Renames over `toPath`. On Windows a rename fails with EPERM, EACCES or EBUSY while
+ * another process has the target open (a reader, a virus scanner), so those are
+ * retried for a short while before the last error is thrown.
+ */
+async function renameWithRetry(
+  fromPath: string,
+  toPath: string
+): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(fromPath, toPath);
+      return;
+    } catch (error: unknown) {
+      const code: unknown = (error as { code?: unknown }).code;
+      if (
+        attempt >= RENAME_ATTEMPTS ||
+        typeof code !== 'string' ||
+        !RENAME_RETRY_CODES.has(code)
+      ) {
+        throw error;
+      }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, RENAME_WAIT_MS * attempt);
+      });
+    }
+  }
+}
+
 export function nodeFileSystem(): FileSystemLike {
   return {
     readFile: (path) => readFile(path, 'utf8'),
@@ -23,7 +60,7 @@ export function nodeFileSystem(): FileSystemLike {
     // 'wx' is O_CREAT | O_EXCL: it fails if anything is there, a symbolic link included.
     writeNewFile: (path, data) =>
       writeFile(path, data, { encoding: 'utf8', flag: 'wx' }),
-    rename: (fromPath, toPath) => rename(fromPath, toPath),
+    rename: renameWithRetry,
     remove: (path) => rm(path, { force: true }),
     mkdir: async (path) => {
       await mkdir(path, { recursive: true });

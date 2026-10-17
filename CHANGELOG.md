@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.10.1
+
+### Patch Changes
+
+- `nodeFileSystem()` retries a rename that fails with `EPERM`, `EACCES` or `EBUSY` for up to about half a second before giving up. On Windows, replacing a file fails this way while another process has it open, which made a write fail when a second process was reading the same file.
+
 ## 0.10.0
 
 ### Minor Changes
