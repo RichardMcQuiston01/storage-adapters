@@ -87,6 +87,29 @@ export async function withFileLock<T>(
   let waitMs: number = firstWaitMs;
   let deniedSince: number | null = null;
 
+  /**
+   * Waits out a denial (see MAX_DENIED_MS), or throws the error if it has gone on too
+   * long or the request was aborted.
+   */
+  const waitOutDenial = async (error: unknown): Promise<void> => {
+    deniedSince ??= Date.now();
+    if (Date.now() - deniedSince > Math.min(timeoutMs, MAX_DENIED_MS)) {
+      throw error;
+    }
+    if (signal.aborted) {
+      throw lockError(
+        'ECANCELED',
+        'request was aborted while waiting for the lock'
+      );
+    }
+    await options.sleep(waitMs, signal);
+    waitMs = Math.min(waitMs * 2, firstWaitMs * 4);
+  };
+  const isDenial = (error: unknown): boolean => {
+    const code: string = errorCodeOf(error);
+    return code === 'EPERM' || code === 'EACCES';
+  };
+
   for (;;) {
     try {
       await create.call(
@@ -96,26 +119,13 @@ export async function withFileLock<T>(
       );
       break;
     } catch (error: unknown) {
-      const code: string = errorCodeOf(error);
-      if (code === 'EPERM' || code === 'EACCES') {
-        deniedSince ??= Date.now();
-        if (Date.now() - deniedSince > Math.min(timeoutMs, MAX_DENIED_MS)) {
-          throw error;
-        }
-        if (signal.aborted) {
-          throw lockError(
-            'ECANCELED',
-            'request was aborted while waiting for the lock'
-          );
-        }
-        await options.sleep(waitMs, signal);
-        waitMs = Math.min(waitMs * 2, firstWaitMs * 4);
+      if (isDenial(error)) {
+        await waitOutDenial(error);
         continue;
       }
-      if (code !== 'EEXIST') {
+      if (errorCodeOf(error) !== 'EEXIST') {
         throw error;
       }
-      deniedSince = null;
     }
     // Someone holds it. If it is old, or has been unreadable for as long, it was
     // left behind by a process that died: break it, but only if it is still the
@@ -124,11 +134,17 @@ export async function withFileLock<T>(
     try {
       seen = await fileSystem.readFile(lockPath);
     } catch (error: unknown) {
-      if (errorCodeOf(error) !== 'ENOENT') {
-        throw error;
+      if (errorCodeOf(error) === 'ENOENT') {
+        continue; // It was released just now: try to take it.
       }
-      continue; // It was released just now: try to take it.
+      if (isDenial(error)) {
+        // On Windows a lock file that is being deleted cannot be opened either.
+        await waitOutDenial(error);
+        continue;
+      }
+      throw error;
     }
+    deniedSince = null; // The lock could be read, so it is not being denied.
     const held = parseLock(seen);
     const now: number = Date.now();
     garbageSince = held === null ? (garbageSince ?? now) : null;
@@ -142,7 +158,9 @@ export async function withFileLock<T>(
           await fileSystem.remove(lockPath);
         }
       } catch (error: unknown) {
-        if (errorCodeOf(error) !== 'ENOENT') {
+        // Gone already, or (on Windows) being deleted by someone else: either way
+        // it is not ours to break, and the next try will see what is there.
+        if (errorCodeOf(error) !== 'ENOENT' && !isDenial(error)) {
           throw error;
         }
       }
