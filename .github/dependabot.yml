@@ -8,5 +8,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Branch features off `dev` and open PRs into `dev`, never `main` (see CLAUDE.md).
+    target-branch: dev
     commit-message:
       prefix: ci

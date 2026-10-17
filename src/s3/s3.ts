@@ -8,6 +8,8 @@
 import { describeUnknownError } from '../errors.js';
 import { createChangeListeners, sqlFailure } from '../sql-shared.js';
 import {
+  compareKeys,
+  prefixFailure,
   utf8Length,
   type StorageAdapter,
   type StoredValue,
@@ -52,6 +54,15 @@ export interface ObjectStoreLike {
     key: string,
     options: { readonly signal: AbortSignal }
   ): Promise<void>;
+  /**
+   * Optional. Every object key that starts with `prefix`, following the store's
+   * pages until the list is complete. Without it `list` reports that it is not
+   * supported.
+   */
+  listKeys?(
+    prefix: string,
+    options: { readonly signal: AbortSignal }
+  ): Promise<string[]>;
 }
 
 export interface S3AdapterOptions {
@@ -527,6 +538,48 @@ export function s3Adapter(options: S3AdapterOptions): StorageAdapter {
       return { ok: true, value: null };
     },
 
+    async list(keyPrefix, { signal }) {
+      if (signal.aborted) {
+        return prefixFailure(
+          label,
+          'unavailable',
+          keyPrefix,
+          'request to list keys was aborted'
+        );
+      }
+      if (store.listKeys === undefined) {
+        return prefixFailure(
+          label,
+          'invalid',
+          keyPrefix,
+          'cannot list keys: the object store has no listKeys method'
+        );
+      }
+      try {
+        const objectKeys: string[] = await store.listKeys(
+          objectKeyOf(keyPrefix),
+          { signal }
+        );
+        // The adapter's own throwaway check objects are not entries.
+        const probe = `${prefix}.storage-adapters-probe-`;
+        const keys: string[] = objectKeys
+          .filter(
+            (objectKey) =>
+              objectKey.startsWith(prefix) && !objectKey.startsWith(probe)
+          )
+          .map((objectKey) => objectKey.slice(prefix.length))
+          .filter((key) => key !== '');
+        return { ok: true, value: keys.sort(compareKeys) };
+      } catch (error: unknown) {
+        return prefixFailure(
+          label,
+          classifyError(error),
+          keyPrefix,
+          `could not list keys (${describeUnknownError(error)})`
+        );
+      }
+    },
+
     subscribe: listeners.subscribe,
   };
 }
@@ -536,6 +589,8 @@ export interface AwsSdkCommands {
   readonly GetObjectCommand: new (input: never) => unknown;
   readonly PutObjectCommand: new (input: never) => unknown;
   readonly DeleteObjectCommand: new (input: never) => unknown;
+  /** Optional: only needed for `list`. Without it the store has no `listKeys`. */
+  readonly ListObjectsV2Command?: new (input: never) => unknown;
 }
 
 export interface AwsSdkObjectStoreOptions {
@@ -621,5 +676,42 @@ export function awsSdkObjectStore(
         signal
       );
     },
+    ...(commands.ListObjectsV2Command === undefined
+      ? {}
+      : {
+          async listKeys(
+            prefix: string,
+            { signal }: { readonly signal: AbortSignal }
+          ): Promise<string[]> {
+            const List = commands.ListObjectsV2Command;
+            const keys: string[] = [];
+            let token: string | undefined;
+            do {
+              const page = (await send(
+                new (List as new (input: never) => unknown)({
+                  Bucket: bucket,
+                  Prefix: prefix,
+                  ...(token === undefined ? {} : { ContinuationToken: token }),
+                } as never),
+                signal
+              )) as {
+                Contents?: { Key?: unknown }[];
+                IsTruncated?: boolean;
+                NextContinuationToken?: unknown;
+              };
+              for (const item of page.Contents ?? []) {
+                if (typeof item.Key === 'string') {
+                  keys.push(item.Key);
+                }
+              }
+              token =
+                page.IsTruncated === true &&
+                typeof page.NextContinuationToken === 'string'
+                  ? page.NextContinuationToken
+                  : undefined;
+            } while (token !== undefined);
+            return keys;
+          },
+        }),
   };
 }

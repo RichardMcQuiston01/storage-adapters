@@ -5,11 +5,12 @@
  * replaced through the options.
  */
 import { describeUnknownError } from '../errors.js';
-import type {
-  StorageAdapter,
-  StoredValue,
-  StoreErrorCode,
-  StoreResult,
+import {
+  compareKeys,
+  type StorageAdapter,
+  type StoredValue,
+  type StoreErrorCode,
+  type StoreResult,
 } from '../storage.js';
 
 /*
@@ -35,6 +36,8 @@ export interface IdbObjectStoreLike {
   get(key: string): IdbRequestLike<unknown>;
   put(value: unknown, key: string): IdbRequestLike<unknown>;
   delete(key: string): IdbRequestLike<unknown>;
+  /** Optional (IndexedDB 2.0, in every current browser): all the keys at once. */
+  getAllKeys?(): IdbRequestLike<unknown[]>;
 }
 
 export interface IdbTransactionLike {
@@ -352,6 +355,55 @@ export function indexedDbAdapter(
   };
 
   const adapter: StorageAdapter = {
+    async list(prefix, { signal }) {
+      const asPrefix = <T>(result: StoreResult<T>): StoreResult<T> =>
+        result.ok
+          ? result
+          : {
+              ...result,
+              error: result.error.replace(
+                ` for key "${prefix}"`,
+                ` for prefix "${prefix}"`
+              ),
+            };
+      const abortedResult = stopped<string[]>(prefix, signal);
+      if (abortedResult !== null) {
+        return asPrefix(abortedResult);
+      }
+      return asPrefix(
+        await transact<string[]>(
+          prefix,
+          'readonly',
+          'listed',
+          (store, settle) => {
+            if (store.getAllKeys === undefined) {
+              settle(
+                failure(
+                  'invalid',
+                  prefix,
+                  'cannot list keys: this IndexedDB has no getAllKeys'
+                )
+              );
+              return;
+            }
+            const request = store.getAllKeys();
+            request.onsuccess = (): void => {
+              const keys: unknown = request.result;
+              settle({
+                ok: true,
+                value: (Array.isArray(keys) ? keys : [])
+                  .filter(
+                    (key): key is string =>
+                      typeof key === 'string' && key.startsWith(prefix)
+                  )
+                  .sort(compareKeys),
+              });
+            };
+          }
+        )
+      );
+    },
+
     async get(key, { signal }) {
       const abortedResult = stopped<StoredValue | null>(key, signal);
       if (abortedResult !== null) {

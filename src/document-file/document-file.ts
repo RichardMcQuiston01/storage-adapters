@@ -4,19 +4,24 @@
  * leaves two things to its callers: the text format (`codec`, for JSON, YAML or INI)
  * and how one entry looks inside the document (`layout`).
  */
+import { describeUnknownError } from '../errors.js';
+import { lockedTask, type FileLockOptions } from '../file/lock.js';
 import type { FileSystemLike } from '../file/file.js';
 import {
+  classifyFileError,
   errorCodeOf,
   failedWithFor,
   failureFor,
   withLock,
   writeTemporaryFile,
 } from '../file/shared.js';
-import type {
-  StorageAdapter,
-  StoredValue,
-  StoreErrorCode,
-  StoreResult,
+import {
+  compareKeys,
+  prefixFailure,
+  type StorageAdapter,
+  type StoredValue,
+  type StoreErrorCode,
+  type StoreResult,
 } from '../storage.js';
 
 /** Turns the file's text into a plain object and back. */
@@ -54,6 +59,8 @@ export interface DocumentFileOptions {
   readonly cache: boolean;
   /** Re-read the file when it changes, if the file system can watch. */
   readonly watch: boolean;
+  /** Take a lock file around each write, so several processes can share the file. */
+  readonly lock?: FileLockOptions;
 }
 
 /** A file read: its entries, or why it is not a usable document. */
@@ -331,39 +338,49 @@ export function documentFileAdapter(
       }
       const result: StoreResult<StoredValue> = await withLock(
         lockName,
-        async (): Promise<StoreResult<StoredValue>> => {
-          try {
-            await ensureDirectory();
-            // Always start from the file, never the cache, so an outside edit is kept.
-            const read: DocumentRead = await readDocument();
-            if (read.kind === 'corrupt') {
-              return corruptDocument(key, read.detail);
+        lockedTask<StoredValue>(
+          {
+            fileSystem,
+            lock: options.lock,
+            lockPath: `${path}.lock`,
+            signal,
+            prepare: ensureDirectory,
+            fail: (error) => failedWithFor(label, error, key, 'written'),
+          },
+          async (): Promise<StoreResult<StoredValue>> => {
+            try {
+              await ensureDirectory();
+              // Always start from the file, never the cache, so an outside edit is kept.
+              const read: DocumentRead = await readDocument();
+              if (read.kind === 'corrupt') {
+                return corruptDocument(key, read.detail);
+              }
+              // What was just read is the truth, even if the write below is refused.
+              adopt(read.entries);
+              // An invalid entry is replaced, so it counts as nothing stored.
+              const existing: StoredValue | null =
+                storedOf(read.entries, key) ?? null;
+              if (
+                ifRevision !== undefined &&
+                existing !== null &&
+                existing.revision !== ifRevision
+              ) {
+                return failure(
+                  'conflict',
+                  key,
+                  `holds revision ${existing.revision ?? ''}, but revision ${ifRevision} was expected`
+                );
+              }
+              const written = layout.write(value, existing);
+              read.entries.set(key, written.raw);
+              await writeDocument(read.entries);
+              snapshot = new Map(read.entries);
+              return { ok: true, value: written.stored };
+            } catch (error: unknown) {
+              return failedWithFor(label, error, key, 'written');
             }
-            // What was just read is the truth, even if the write below is refused.
-            adopt(read.entries);
-            // An invalid entry is replaced, so it counts as nothing stored.
-            const existing: StoredValue | null =
-              storedOf(read.entries, key) ?? null;
-            if (
-              ifRevision !== undefined &&
-              existing !== null &&
-              existing.revision !== ifRevision
-            ) {
-              return failure(
-                'conflict',
-                key,
-                `holds revision ${existing.revision ?? ''}, but revision ${ifRevision} was expected`
-              );
-            }
-            const written = layout.write(value, existing);
-            read.entries.set(key, written.raw);
-            await writeDocument(read.entries);
-            snapshot = new Map(read.entries);
-            return { ok: true, value: written.stored };
-          } catch (error: unknown) {
-            return failedWithFor(label, error, key, 'written');
           }
-        }
+        )
       );
       if (result.ok) {
         notify(key, result.value);
@@ -378,27 +395,73 @@ export function documentFileAdapter(
       }
       const result: StoreResult<null> = await withLock(
         lockName,
-        async (): Promise<StoreResult<null>> => {
-          try {
-            const read: DocumentRead = await readDocument();
-            if (read.kind === 'corrupt') {
-              return corruptDocument(key, read.detail);
+        lockedTask<null>(
+          {
+            fileSystem,
+            lock: options.lock,
+            lockPath: `${path}.lock`,
+            signal,
+            prepare: ensureDirectory,
+            fail: (error) => failedWithFor(label, error, key, 'removed'),
+          },
+          async (): Promise<StoreResult<null>> => {
+            try {
+              const read: DocumentRead = await readDocument();
+              if (read.kind === 'corrupt') {
+                return corruptDocument(key, read.detail);
+              }
+              adopt(read.entries);
+              if (read.entries.delete(key)) {
+                await writeDocument(read.entries);
+              }
+              snapshot = new Map(read.entries);
+              return { ok: true, value: null };
+            } catch (error: unknown) {
+              return failedWithFor(label, error, key, 'removed');
             }
-            adopt(read.entries);
-            if (read.entries.delete(key)) {
-              await writeDocument(read.entries);
-            }
-            snapshot = new Map(read.entries);
-            return { ok: true, value: null };
-          } catch (error: unknown) {
-            return failedWithFor(label, error, key, 'removed');
           }
-        }
+        )
       );
       if (result.ok) {
         notify(key, null);
       }
       return result;
+    },
+
+    async list(prefix, { signal }) {
+      if (signal.aborted) {
+        return prefixFailure(
+          label,
+          'unavailable',
+          prefix,
+          'request to list keys was aborted'
+        );
+      }
+      try {
+        const read: DocumentRead = await load();
+        if (read.kind === 'corrupt') {
+          return prefixFailure(
+            label,
+            'corrupt',
+            prefix,
+            `cannot be used: ${path} ${read.detail}. Fix or delete the file; it was left as it is`
+          );
+        }
+        // Entries that are not valid entries are left out, as `get` would refuse them.
+        const keys: string[] = [...read.entries.keys()].filter(
+          (key) =>
+            key.startsWith(prefix) &&
+            layout.read(read.entries.get(key)) !== undefined
+        );
+        return { ok: true, value: keys.sort(compareKeys) };
+      } catch (error: unknown) {
+        return prefixFailure(
+          label,
+          classifyFileError(error),
+          prefix,
+          `could not list keys (${describeUnknownError(error)})`
+        );
+      }
     },
 
     subscribe(key, onChange) {

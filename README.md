@@ -57,7 +57,33 @@ Wrappers: `withPrefix`, `withFallback`, `withReadCache`, `readOnly`,
 `withRetry` (you pass `sleep`, so there are no timers), `withEncoding`
 (compression or encryption, with your own functions) and `withLogging`
 (keys and outcomes, never values). Implement `get`, `set` and optionally
-`remove` and `subscribe` for localStorage, IndexedDB, REST or a database.
+`remove`, `list` and `subscribe` for localStorage, IndexedDB, REST or a database.
+
+#### Listing keys
+
+`list(prefix, { signal })` is an optional method that resolves the keys that start
+with `prefix` (`''` for every key), sorted in plain code-unit order. Every adapter in
+this package has it, and the wrappers pass it through (`withPrefix` strips its prefix
+from the keys, `withFallback` merges both stores).
+
+```ts
+const keys = await adapter.list?.('draft:', { signal });
+if (keys?.ok) {
+  for (const key of keys.value) await adapter.remove?.(key, { signal }); // clear a namespace
+}
+```
+
+It returns every matching key at once and reads no values, so it suits small stores
+or narrow prefixes; a prefix is matched as plain text, never as a pattern. An adapter
+that cannot list answers `invalid` and says why: the file adapter needs a
+`FileSystemLike` with `listFiles` (`nodeFileSystem()` has it), SQLite needs a statement
+with `all()`, the browser adapters need a storage with `length` and `key()` (the real
+ones have both), IndexedDB needs `getAllKeys`, and S3 needs an object store with
+`listKeys` (`awsSdkObjectStore` has it when you also pass `ListObjectsV2Command`). The
+browser adapters list only keys that hold one of their own envelopes, since the
+storage is shared with the page; Redis lists every key under its `prefix`, so give it
+one. Keys the adapter holds are the same as `get` would find: a corrupt document entry
+is not listed.
 
 #### Browser storage
 
@@ -241,6 +267,45 @@ the latest state. If the subscriber cannot start, writes still work, the failure
 to `onSubscriberError`, and the adapter tries again every `subscriberRetryMs`
 (default 5000, `0` for never) while anyone is subscribed.
 
+#### REST storage
+
+To keep values behind your own HTTP API, use `restAdapter` from the optional `/rest`
+entry point. It imports nothing and never touches the network itself: you pass in the
+`fetch` to use (the global one fits).
+
+```ts
+import { restAdapter } from '@richardmcquiston01/storage-adapters/rest';
+
+const adapter: StorageAdapter = restAdapter({
+  baseUrl: 'https://api.example.com/storage',
+  fetch,
+  headers: () => ({ Authorization: `Bearer ${currentToken()}` }), // or a plain object
+  name: 'Settings API', // used in error messages
+});
+```
+
+The API it talks to is small. Keys are URL-encoded in the path, and bodies are JSON:
+
+| Request | Answer |
+| --- | --- |
+| `GET {baseUrl}/{key}` | `200 {"value": "...", "revision": "..."}`, or `404` when nothing is stored |
+| `PUT {baseUrl}/{key}` with `{"value": "..."}` | `200`, `201` or `204`, with the new `revision` in the JSON or an `ETag` header |
+| `PUT` with `If-Match: <revision>` | the same, or `412` (or `409`) when the stored revision differs |
+| `DELETE {baseUrl}/{key}` | `200`, `202`, `204` or `404` |
+| `GET {baseUrl}?prefix=...` (optional) | `200 {"keys": ["...", ...]}` |
+
+The revision is opaque and is sent back exactly as the server gave it (a JSON
+`revision` wins over an `ETag`). A key with nothing stored has no revision to differ,
+so `set` with `ifRevision` must create it. A server that cannot do that and answers
+`404` or `412` is asked what it holds: if nothing, the adapter retries with
+`If-None-Match: *`; otherwise it is a `conflict` that names both revisions. A
+server without revisions still works; `ifRevision` is then not enforced. Status codes
+map to results: `401` and `403` are `forbidden`, `413` and `507` are `quota`, `400`
+and `422` are `invalid`, a body that is not the documented shape is `corrupt`, and
+everything else, a network failure included, is `unavailable`. Messages carry the
+status and what the server said. `subscribe` reports changes made through the same
+adapter.
+
 #### S3 and DigitalOcean Spaces storage
 
 To keep values in a bucket, use `s3Adapter` from the optional `/s3` entry point. It
@@ -344,17 +409,39 @@ there first. A full disk is `quota`, a permission error is `forbidden`, a file t
 is not an entry is `corrupt`, and nothing throws. A crash can leave a `*.tmp` file
 behind; it is safe to delete.
 
-**Use one process per directory.** The queue lives in the process, so two
-processes writing the same directory can lose updates. In a test with four
-processes each adding 1 to a shared counter 40 times, about half of the additions
-were lost. Use the SQLite adapter when more than one process writes. The adapter
-does not `fsync`, so a power failure shortly after a write can lose it.
-`subscribe` reports changes made through adapters in this process and, when the
-file system can watch a directory (`nodeFileSystem()` can), files that another
-process or a person changes, writes, replaces or deletes. It stays quiet for a
-file that did not change and for half-written files, and the folder is watched only
-while someone is subscribed. Hearing about another process's write does not make
-two writers safe; the warning above still applies.
+**Use one process per directory, or turn on the lock.** By default the write queue
+lives in the process, so two processes writing the same directory can lose updates:
+in a test with four processes each adding 1 to a shared counter 25 times, 66 of the 100
+additions were lost. Pass `lock` and every write first takes a lock file next to its
+key (`<key>.json.lock`), made with an exclusive create, so processes take turns and
+`ifRevision` is checked against what the other process just wrote. The same test with
+the lock loses none.
+
+```ts
+const adapter: StorageAdapter = fileAdapter({
+  directory: './data',
+  fileSystem: nodeFileSystem(),
+  lock: {
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)), // you pass the timer
+    // optional: staleMs 30000, timeoutMs 10000, retryMs 25
+  },
+});
+```
+
+A process that cannot get the lock within `timeoutMs` gets `unavailable` with the lock
+file's name, and nothing is written. A lock older than `staleMs` is taken to belong to
+a process that died and is broken; only the lock that was judged stale is removed, and
+a lock is released only if it is still the one this write took. The lock needs a
+`FileSystemLike` with `writeNewFile` (`nodeFileSystem()` has it) and a file system where
+exclusive create is atomic: local disks are, some network file systems are not. A
+process that stalls for longer than `staleMs` while holding a lock can lose it, and the
+lock is advisory: it protects writers that all use it. Reads need no lock, because a
+write replaces the file in one step. The adapter does not `fsync`, so a power failure
+shortly after a write can lose it. `subscribe` reports changes made through adapters in
+this process and, when the file system can watch a directory (`nodeFileSystem()` can),
+files that another process or a person changes, writes, replaces or deletes. It stays
+quiet for a file that did not change and for half-written files, and the folder is
+watched only while someone is subscribed.
 
 #### JSON file storage
 
@@ -411,11 +498,12 @@ Choose by how much data you have and who writes it:
 
 | Adapter | Good for | Limit |
 | --- | --- | --- |
-| `jsonFileAdapter` | Settings a person may edit by hand | Rewrites the whole file on each write; one process |
-| `yamlFileAdapter`, `iniFileAdapter` | Settings a person edits by hand in YAML or INI | Rewrites the whole file and drops comments; one process |
-| `fileAdapter` | Many or large values | One process per directory |
+| `jsonFileAdapter` | Settings a person may edit by hand | Rewrites the whole file on each write; one process unless `lock` is set |
+| `yamlFileAdapter`, `iniFileAdapter` | Settings a person edits by hand in YAML or INI | Rewrites the whole file and drops comments; one process unless `lock` is set |
+| `fileAdapter` | Many or large values | One process per directory unless `lock` is set |
 | `sqliteAdapter` | Several processes writing | Needs a SQLite driver |
 | `postgresAdapter`, `mysqlAdapter` | Several servers sharing one database | Needs a driver and a running server |
+| `restAdapter` | Values kept behind your own HTTP API | One request per call; you provide the API |
 | `s3Adapter` | Values shared by many servers, no database to run | One or more requests per call; `ifRevision` needs a store that enforces conditional writes |
 
 #### YAML and INI file storage
@@ -478,7 +566,7 @@ code (the `yaml` package's `parse` is safe).
 
 **The adapter rewrites the whole file when it writes, and does not keep comments or
 layout.** Comments are safe only while the program just reads the file; the first
-write removes them. Like the other file adapters, it is safe within one process only.
+write removes them. Like the other file adapters, it is safe within one process unless you pass `lock` (a lock file beside the document, `<file>.lock`, with the same options and limits as the file adapter's), which lets several processes share it.
 
 #### Typed persistence
 
@@ -524,7 +612,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 

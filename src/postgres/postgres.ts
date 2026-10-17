@@ -12,11 +12,13 @@ import {
   revisionText,
   sqlFailure,
 } from '../sql-shared.js';
-import type {
-  StorageAdapter,
-  StoredValue,
-  StoreErrorCode,
-  StoreResult,
+import {
+  compareKeys,
+  prefixFailure,
+  type StorageAdapter,
+  type StoredValue,
+  type StoreErrorCode,
+  type StoreResult,
 } from '../storage.js';
 
 /** The values a statement parameter can take here: keys, values and revisions. */
@@ -64,6 +66,7 @@ interface Statements {
   readonly upsertIfRevision: string;
   readonly selectRevision: string;
   readonly remove: string;
+  readonly list: string;
 }
 
 /*
@@ -97,6 +100,8 @@ ON CONFLICT (entry_key) DO UPDATE SET
       upsertIfRevision: `${upsert}\nWHERE ${table}.revision = $3::bigint\nRETURNING revision::text AS revision`,
       selectRevision: `SELECT revision::text AS revision FROM ${table} WHERE entry_key = $1`,
       remove: `DELETE FROM ${table} WHERE entry_key = $1`,
+      // Compared as text with left(), so the prefix's characters are never wildcards.
+      list: `SELECT entry_key FROM ${table} WHERE left(entry_key, char_length($1::text)) = $1::text`,
     },
   };
 }
@@ -303,6 +308,45 @@ export function postgresAdapter(
       }
       listeners.notify(key, null);
       return { ok: true, value: null };
+    },
+
+    async list(prefix, { signal }) {
+      if (signal.aborted) {
+        return prefixFailure(
+          LABEL,
+          'unavailable',
+          prefix,
+          'request to list keys was aborted'
+        );
+      }
+      if (!tableIsSafe) {
+        return prefixFailure(
+          LABEL,
+          'invalid',
+          prefix,
+          `cannot use table name "${table}": use letters, digits and underscores, with an optional schema prefix`
+        );
+      }
+      try {
+        await prepare();
+        const result = await client.query(sql.statements.list, [prefix]);
+        const keys: string[] = [];
+        for (const row of Array.isArray(result.rows) ? result.rows : []) {
+          const key: unknown = (row as { entry_key?: unknown } | null)
+            ?.entry_key;
+          if (typeof key === 'string') {
+            keys.push(key);
+          }
+        }
+        return { ok: true, value: keys.sort(compareKeys) };
+      } catch (error: unknown) {
+        return prefixFailure(
+          LABEL,
+          classifyError(error),
+          prefix,
+          `could not list keys (${describeUnknownError(error)})`
+        );
+      }
     },
 
     subscribe: listeners.subscribe,

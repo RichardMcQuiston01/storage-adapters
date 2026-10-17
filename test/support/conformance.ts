@@ -364,6 +364,136 @@ export function runConformance(
       });
     });
 
+    void describe('list', () => {
+      /** Writes the keys the adapter accepts (some formats refuse some) and returns those. */
+      const store = async (
+        adapter: StorageAdapter,
+        keys: readonly string[]
+      ): Promise<string[]> => {
+        const stored: string[] = [];
+        for (const key of keys) {
+          const written = await adapter.set(key, `value of ${key}`, { signal });
+          if (written.ok) {
+            stored.push(key);
+          }
+        }
+        return stored;
+      };
+      const listed = async (
+        adapter: StorageAdapter,
+        prefix: string
+      ): Promise<string[]> => {
+        assert.ok(adapter.list !== undefined, 'adapter should implement list');
+        const result = await adapter.list(prefix, { signal });
+        return expectOk(result);
+      };
+      const sorted = (keys: readonly string[]): string[] =>
+        [...keys].sort((left, right) =>
+          left < right ? -1 : left > right ? 1 : 0
+        );
+
+      test('lists nothing when nothing is stored', async ({ adapter }) => {
+        if (adapter.list === undefined) return;
+        assert.deepEqual(await listed(adapter, ''), []);
+        assert.deepEqual(await listed(adapter, 'anything'), []);
+      });
+
+      test('lists every key for the empty prefix, sorted', async ({
+        adapter,
+      }) => {
+        if (adapter.list === undefined) return;
+        const keys = await store(adapter, ['b', 'a', 'B', 'ab', 'c1', 'c10']);
+        assert.ok(keys.length >= 4, 'the adapter should accept simple keys');
+        assert.deepEqual(await listed(adapter, ''), sorted(keys));
+      });
+
+      test('lists only the keys that start with the prefix', async ({
+        adapter,
+      }) => {
+        if (adapter.list === undefined) return;
+        await store(adapter, ['user-1', 'user-2', 'users', 'usr', 'other']);
+        assert.deepEqual(await listed(adapter, 'user-'), ['user-1', 'user-2']);
+        assert.deepEqual(await listed(adapter, 'user'), [
+          'user-1',
+          'user-2',
+          'users',
+        ]);
+        assert.deepEqual(await listed(adapter, 'user-1'), ['user-1']);
+        assert.deepEqual(await listed(adapter, 'nothing-like-this'), []);
+      });
+
+      test('tells keys apart by case and does not treat the prefix as a pattern', async ({
+        adapter,
+      }) => {
+        if (adapter.list === undefined) return;
+        const candidates = [
+          'a%b',
+          'axb',
+          'a_c',
+          'abc',
+          'a*d',
+          'a?e',
+          'a[f',
+          'a\\g',
+          'a.h',
+          'Ab',
+        ];
+        const keys = await store(adapter, candidates);
+        for (const prefix of ['a%', 'a_', 'a*', 'a?', 'a[', 'a\\', 'a.', 'A']) {
+          assert.deepEqual(
+            await listed(adapter, prefix),
+            sorted(keys.filter((key) => key.startsWith(prefix))),
+            `prefix ${JSON.stringify(prefix)}`
+          );
+        }
+      });
+
+      test('lists keys with slashes, spaces and non-ASCII text', async ({
+        adapter,
+      }) => {
+        if (adapter.list === undefined) return;
+        const keys = await store(adapter, [
+          'dir/one',
+          'dir/two',
+          'with space',
+          'Élan',
+          'emoji-😀',
+        ]);
+        assert.deepEqual(await listed(adapter, ''), sorted(keys));
+        assert.deepEqual(
+          await listed(adapter, 'dir/'),
+          sorted(keys.filter((key) => key.startsWith('dir/')))
+        );
+      });
+
+      test('stops listing a key once it is removed, and lists it again when rewritten', async ({
+        adapter,
+      }) => {
+        if (adapter.list === undefined || adapter.remove === undefined) return;
+        await store(adapter, ['k1', 'k2']);
+        await adapter.remove('k1', { signal });
+        assert.deepEqual(await listed(adapter, 'k'), ['k2']);
+        await adapter.set('k1', 'back', { signal });
+        assert.deepEqual(await listed(adapter, 'k'), ['k1', 'k2']);
+      });
+
+      test('returns unavailable and names the prefix when aborted', async ({
+        adapter,
+      }) => {
+        if (adapter.list === undefined) return;
+        await store(adapter, ['k1']);
+        const result = await adapter.list('k', { signal: aborted() });
+        if (result.ok) {
+          assert.fail(`expected a failure, got ${JSON.stringify(result)}`);
+        }
+        assert.equal(result.code, 'unavailable');
+        assert.ok(
+          result.error.includes('"k"'),
+          `error should name the prefix: ${result.error}`
+        );
+      });
+    });
+
     void describe('abort', () => {
       test('get returns unavailable and names the key', async ({ adapter }) => {
         expectFailure(

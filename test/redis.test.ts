@@ -96,6 +96,14 @@ function fakeRedis(): FakeRedis {
         return Promise.reject(failure);
       }
       const [name, script, , redisKey, ...rest] = args;
+      if (name === 'SCAN') {
+        // MATCH <escaped prefix>*: unescape the prefix and compare as text.
+        const prefix = (args[3] ?? '').slice(0, -1).replace(/\\(.)/g, '$1');
+        return Promise.resolve([
+          '0',
+          [...hashes.keys()].filter((key) => key.startsWith(prefix)),
+        ]);
+      }
       if (name === 'HMGET') {
         const found = hashes.get(script ?? '');
         return Promise.resolve([found?.r ?? null, found?.v ?? null]);

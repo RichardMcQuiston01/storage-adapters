@@ -58,6 +58,17 @@ export interface StorageAdapter {
     key: string,
     options: { readonly signal: AbortSignal }
   ): Promise<StoreResult<null>>;
+  /**
+   * Optional: the keys that start with `prefix` (`''` for every key), as plain
+   * keys, sorted by `compareKeys`. Reads nothing but the key names, and returns
+   * them all, so it suits small stores or narrow prefixes. An adapter that cannot
+   * list (a file system without a directory listing, a store with no such call)
+   * returns an `invalid` result that says so.
+   */
+  list?(
+    prefix: string,
+    options: { readonly signal: AbortSignal }
+  ): Promise<StoreResult<string[]>>;
   /** Optional: report a change made elsewhere (another tab). Returns an unsubscribe. */
   subscribe?(
     key: string,
@@ -74,6 +85,33 @@ export function failure(
   readonly error: string;
 } {
   return { ok: false, code, error };
+}
+
+/** `<label> <detail> for prefix "<prefix>"`: a failed `list` names the store and the prefix. */
+export function prefixFailure<T>(
+  label: string,
+  code: StoreErrorCode,
+  prefix: string,
+  detail: string
+): StoreResult<T> {
+  return {
+    ok: false,
+    code,
+    error: `${label} ${detail} for prefix "${prefix}"`,
+  };
+}
+
+/** The order `list` returns keys in: plain code-unit order, the same everywhere. */
+export function compareKeys(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** The keys that start with `prefix`, in `compareKeys` order. */
+export function keysWithPrefix(
+  keys: Iterable<string>,
+  prefix: string
+): string[] {
+  return [...keys].filter((key) => key.startsWith(prefix)).sort(compareKeys);
 }
 
 /** UTF-8 byte length without `TextEncoder` (no DOM or Node lib). */
@@ -163,6 +201,12 @@ export function memoryAdapter(
       notify(key, null);
       return Promise.resolve({ ok: true, value: null });
     },
+    list: (prefix, options) =>
+      stopped<string[]>(prefix, 'list keys under', options.signal) ??
+      Promise.resolve({
+        ok: true,
+        value: keysWithPrefix(entries.keys(), prefix),
+      }),
     subscribe: (key, onChange) => {
       const set: Set<(stored: StoredValue | null) => void> =
         listeners.get(key) ?? new Set();
@@ -189,6 +233,24 @@ export function withPrefix(
           remove: (key: string, options: { readonly signal: AbortSignal }) =>
             adapter.remove?.(prefix + key, options) ??
             Promise.resolve(failure('invalid', 'remove is not supported.')),
+        }),
+    ...(adapter.list === undefined
+      ? {}
+      : {
+          list: async (
+            keyPrefix: string,
+            options: { readonly signal: AbortSignal }
+          ): Promise<StoreResult<string[]>> => {
+            const listed =
+              (await adapter.list?.(prefix + keyPrefix, options)) ??
+              failure('invalid', 'list is not supported.');
+            return listed.ok
+              ? {
+                  ok: true,
+                  value: listed.value.map((key) => key.slice(prefix.length)),
+                }
+              : listed;
+          },
         }),
     ...(adapter.subscribe === undefined
       ? {}
@@ -244,6 +306,32 @@ export function withFallback(
       await secondary.remove?.(key, options);
       return first;
     },
+    ...(primary.list === undefined && secondary.list === undefined
+      ? {}
+      : {
+          // Keys from both stores, so a key that only the secondary holds (the
+          // fallback for `get`) is listed too. One store failing is not fatal.
+          list: async (
+            prefix: string,
+            options: { readonly signal: AbortSignal }
+          ): Promise<StoreResult<string[]>> => {
+            const first = await primary.list?.(prefix, options);
+            const second = await secondary.list?.(prefix, options);
+            const results: StoreResult<string[]>[] = [first, second].filter(
+              (result): result is StoreResult<string[]> => result !== undefined
+            );
+            const listed: string[][] = results.flatMap((result) =>
+              result.ok ? [result.value] : []
+            );
+            if (listed.length === 0) {
+              return results[0] ?? failure('invalid', 'list is not supported.');
+            }
+            return {
+              ok: true,
+              value: [...new Set(listed.flat())].sort(compareKeys),
+            };
+          },
+        }),
     subscribe: (key, onChange) => {
       const stops: (() => void)[] = [primary, secondary].flatMap((adapter) => {
         const stop: (() => void) | undefined = adapter.subscribe?.(
@@ -307,6 +395,7 @@ export function withReadCache(adapter: StorageAdapter): StorageAdapter {
       if (generationOf(key) === started) cache.delete(key);
       return result;
     },
+    ...(adapter.list === undefined ? {} : { list: adapter.list.bind(adapter) }),
     ...(adapter.subscribe === undefined
       ? {}
       : {
@@ -341,6 +430,7 @@ export function readOnly(adapter: StorageAdapter): StorageAdapter {
           `Could not remove "${key}": this store is read-only.`
         )
       ),
+    ...(adapter.list === undefined ? {} : { list: adapter.list.bind(adapter) }),
     ...(adapter.subscribe === undefined
       ? {}
       : { subscribe: adapter.subscribe.bind(adapter) }),
@@ -406,6 +496,18 @@ export function withRetry(
               () =>
                 adapter.remove?.(key, o) ??
                 Promise.resolve(failure('invalid', 'remove is not supported.'))
+            ),
+        }),
+    ...(adapter.list === undefined
+      ? {}
+      : {
+          list: (prefix: string, o: { readonly signal: AbortSignal }) =>
+            retrying(
+              prefix,
+              o.signal,
+              () =>
+                adapter.list?.(prefix, o) ??
+                Promise.resolve(failure('invalid', 'list is not supported.'))
             ),
         }),
     ...(adapter.subscribe === undefined
@@ -477,6 +579,7 @@ export function withEncoding(
     ...(adapter.remove === undefined
       ? {}
       : { remove: adapter.remove.bind(adapter) }),
+    ...(adapter.list === undefined ? {} : { list: adapter.list.bind(adapter) }),
     ...(adapter.subscribe === undefined
       ? {}
       : {
@@ -520,7 +623,8 @@ export function withEncoding(
 }
 
 export interface StorageLogEvent {
-  readonly operation: 'get' | 'set' | 'remove';
+  /** For `list`, `key` is the prefix that was listed. */
+  readonly operation: 'get' | 'set' | 'remove' | 'list';
   readonly key: string;
   readonly ok: boolean;
   /** Present when `ok` is false. Values are never logged. */
@@ -561,6 +665,17 @@ export function withLogging(
               key,
               (await adapter.remove?.(key, o)) ??
                 failure('invalid', 'remove is not supported.')
+            ),
+        }),
+    ...(adapter.list === undefined
+      ? {}
+      : {
+          list: async (prefix: string, o: { readonly signal: AbortSignal }) =>
+            report(
+              'list',
+              prefix,
+              (await adapter.list?.(prefix, o)) ??
+                failure('invalid', 'list is not supported.')
             ),
         }),
     ...(adapter.subscribe === undefined

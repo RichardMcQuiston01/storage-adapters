@@ -13,6 +13,9 @@ adapter layer. Extracted from `dashboard-widgets-toolkit`
 - Bun only (`bun install`, `bun run <script>`, `bunx`); never `npm`/`npx`
   locally. Lockfile `bun.lock` is committed. `npm publish` appears only in
   the release workflow, for provenance.
+- Developing here needs Bun 1.4 or newer: the tests use `node:sqlite`, and older
+  Bun writes a lockfile this repo's Bun cannot read. The workflows pin the
+  exact version. Consumers on Bun only need 1.3 (`engines`), for `bun:sqlite`.
 - Scripts: `typecheck`, `lint`, `format`, `format:check`, `test`, `build`,
   `changeset`, `version-packages`.
 - Dual ESM + CommonJS output with declarations (`.d.ts`, `.d.cts`) for every

@@ -46,8 +46,6 @@
 
 1. **Chromium in CI.** Move the real-browser checks for localStorage,
    sessionStorage and IndexedDB into the repository and run them in CI.
-2. **Cross-process locking for the file adapters.** An optional lock file so
-   several processes can share one directory or document safely.
 
 ## Eventually
 
@@ -80,9 +78,6 @@ conformance suite.
 - Keep comments and layout when writing YAML, by editing the parsed document
   instead of rewriting it (the `yaml` package can do this). INI has no such option
   in the `ini` package.
-- REST adapter for a remote key-value API.
-- Optional `list(prefix, options)` on `StorageAdapter`, to list or clear keys.
-  Useful once the file and database adapters exist.
 - Switch `dashboard-widgets-toolkit` to depend on this package; it keeps
   re-exporting the wrappers so its public API and tests are unchanged.
 - Optional React hook (`useStoredValue`).

@@ -91,6 +91,19 @@ export function fakeFileSystem(withWatch = true): FakeFileSystem {
       files.delete(path);
       return Promise.resolve();
     },
+    listFiles: (directory) => {
+      calls.push(`listFiles ${directory}`);
+      const folder = `${directory.replace(/[\\/]+$/, '')}/`;
+      return Promise.resolve(
+        [...files.keys()]
+          .filter(
+            (path) =>
+              path.startsWith(folder) &&
+              !path.slice(folder.length).includes('/')
+          )
+          .map((path) => path.slice(folder.length))
+      );
+    },
     mkdir: (path) => {
       calls.push(`mkdir ${path}`);
       return fake.failures.mkdir !== undefined
