@@ -5,11 +5,13 @@
  * `bun:sqlite` or any driver with the same small surface, and pass it in.
  */
 import { describeUnknownError } from '../errors.js';
-import type {
-  StorageAdapter,
-  StoredValue,
-  StoreErrorCode,
-  StoreResult,
+import {
+  compareKeys,
+  prefixFailure,
+  type StorageAdapter,
+  type StoredValue,
+  type StoreErrorCode,
+  type StoreResult,
 } from '../storage.js';
 
 /** The values a statement parameter can take here: keys, values and revisions. */
@@ -20,6 +22,11 @@ export interface SqliteStatementLike {
   run(...parameters: SqliteParameter[]): unknown;
   /** Resolves the first row, or `undefined` / `null` when there is none. */
   get(...parameters: SqliteParameter[]): unknown;
+  /**
+   * Optional: resolves every row. `node:sqlite` and `bun:sqlite` both have it. Without
+   * it `list` reports that it is not supported.
+   */
+  all?(...parameters: SqliteParameter[]): unknown[];
 }
 
 /** The subset of a database this adapter uses (`DatabaseSync`, `bun:sqlite`'s `Database`). */
@@ -78,6 +85,9 @@ const UPSERT_IF_REVISION_SQL = UPSERT_SQL.replace(
 
 const SELECT_REVISION_SQL =
   'SELECT revision FROM storage_entry WHERE entry_key = ?';
+/** Keys that start with the prefix, compared as text (no LIKE, so no wildcards). Parameters: prefix twice. */
+const LIST_SQL =
+  'SELECT entry_key FROM storage_entry WHERE substr(entry_key, 1, length(?)) = ?';
 const DELETE_SQL = 'DELETE FROM storage_entry WHERE entry_key = ?';
 
 /** A conditional write is retried this many times if its row keeps vanishing. */
@@ -290,6 +300,51 @@ export function sqliteAdapter(options: SqliteAdapterOptions): StorageAdapter {
       }
       notify(key, null);
       return Promise.resolve({ ok: true, value: null });
+    },
+
+    list(prefix, { signal }) {
+      if (signal.aborted) {
+        return Promise.resolve(
+          prefixFailure(
+            'SQLite',
+            'unavailable',
+            prefix,
+            'request to list keys was aborted'
+          )
+        );
+      }
+      try {
+        prepare();
+        const statement: SqliteStatementLike = database.prepare(LIST_SQL);
+        if (statement.all === undefined) {
+          return Promise.resolve(
+            prefixFailure(
+              'SQLite',
+              'invalid',
+              prefix,
+              'cannot list keys: the statement has no all() method'
+            )
+          );
+        }
+        const keys: string[] = [];
+        for (const row of statement.all(prefix, prefix)) {
+          const key: unknown = (row as { entry_key?: unknown } | null)
+            ?.entry_key;
+          if (typeof key === 'string') {
+            keys.push(key);
+          }
+        }
+        return Promise.resolve({ ok: true, value: keys.sort(compareKeys) });
+      } catch (error: unknown) {
+        return Promise.resolve(
+          prefixFailure(
+            'SQLite',
+            classifyError(error),
+            prefix,
+            `could not list keys (${describeUnknownError(error)})`
+          )
+        );
+      }
     },
 
     subscribe(key, onChange) {

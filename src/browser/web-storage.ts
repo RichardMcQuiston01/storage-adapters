@@ -3,11 +3,13 @@
  * This is the only part of the package that touches these browser globals, so it
  * ships as the optional `/browser` entry point and the core stays free of I/O.
  */
-import type {
-  StorageAdapter,
-  StoredValue,
-  StoreErrorCode,
-  StoreResult,
+import {
+  compareKeys,
+  prefixFailure,
+  type StorageAdapter,
+  type StoredValue,
+  type StoreErrorCode,
+  type StoreResult,
 } from '../storage.js';
 
 /** The subset of the Web Storage API this adapter uses. */
@@ -15,6 +17,10 @@ export interface WebStorageLike {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
+  /** Optional, as on the real `Storage`: how many keys there are. Needed for `list`. */
+  readonly length?: number;
+  /** Optional, as on the real `Storage`: the key at a position. Needed for `list`. */
+  key?(index: number): string | null;
 }
 
 /** The parts of a `storage` event this adapter reads. */
@@ -274,6 +280,60 @@ export function webStorageAdapter(
         );
       }
       return Promise.resolve({ ok: true, value: null });
+    },
+
+    list(prefix, { signal }) {
+      if (signal.aborted) {
+        return Promise.resolve(
+          prefixFailure(
+            name,
+            'unavailable',
+            prefix,
+            'request to list keys was aborted'
+          )
+        );
+      }
+      const storage: WebStorageLike | null = resolveStorage();
+      if (storage === null) {
+        return Promise.resolve(
+          prefixFailure(name, 'unavailable', prefix, 'is not available')
+        );
+      }
+      if (typeof storage.length !== 'number' || storage.key === undefined) {
+        return Promise.resolve(
+          prefixFailure(
+            name,
+            'invalid',
+            prefix,
+            'cannot list keys: this storage has no length and key()'
+          )
+        );
+      }
+      try {
+        const keys: string[] = [];
+        for (let index = 0; index < storage.length; index += 1) {
+          const key: string | null = storage.key(index);
+          // The storage is shared with the rest of the page, so only keys that hold
+          // one of this adapter's envelopes count.
+          if (
+            key !== null &&
+            key.startsWith(prefix) &&
+            parseEnvelope(storage.getItem(key)) != null
+          ) {
+            keys.push(key);
+          }
+        }
+        return Promise.resolve({ ok: true, value: keys.sort(compareKeys) });
+      } catch (error: unknown) {
+        return Promise.resolve(
+          prefixFailure(
+            name,
+            classifyError(error),
+            prefix,
+            `could not list keys (${String(error)})`
+          )
+        );
+      }
     },
 
     subscribe(key, onChange) {

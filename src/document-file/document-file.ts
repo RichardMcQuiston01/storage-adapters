@@ -4,19 +4,23 @@
  * leaves two things to its callers: the text format (`codec`, for JSON, YAML or INI)
  * and how one entry looks inside the document (`layout`).
  */
+import { describeUnknownError } from '../errors.js';
 import type { FileSystemLike } from '../file/file.js';
 import {
+  classifyFileError,
   errorCodeOf,
   failedWithFor,
   failureFor,
   withLock,
   writeTemporaryFile,
 } from '../file/shared.js';
-import type {
-  StorageAdapter,
-  StoredValue,
-  StoreErrorCode,
-  StoreResult,
+import {
+  compareKeys,
+  prefixFailure,
+  type StorageAdapter,
+  type StoredValue,
+  type StoreErrorCode,
+  type StoreResult,
 } from '../storage.js';
 
 /** Turns the file's text into a plain object and back. */
@@ -399,6 +403,42 @@ export function documentFileAdapter(
         notify(key, null);
       }
       return result;
+    },
+
+    async list(prefix, { signal }) {
+      if (signal.aborted) {
+        return prefixFailure(
+          label,
+          'unavailable',
+          prefix,
+          'request to list keys was aborted'
+        );
+      }
+      try {
+        const read: DocumentRead = await load();
+        if (read.kind === 'corrupt') {
+          return prefixFailure(
+            label,
+            'corrupt',
+            prefix,
+            `cannot be used: ${path} ${read.detail}. Fix or delete the file; it was left as it is`
+          );
+        }
+        // Entries that are not valid entries are left out, as `get` would refuse them.
+        const keys: string[] = [...read.entries.keys()].filter(
+          (key) =>
+            key.startsWith(prefix) &&
+            layout.read(read.entries.get(key)) !== undefined
+        );
+        return { ok: true, value: keys.sort(compareKeys) };
+      } catch (error: unknown) {
+        return prefixFailure(
+          label,
+          classifyFileError(error),
+          prefix,
+          `could not list keys (${describeUnknownError(error)})`
+        );
+      }
     },
 
     subscribe(key, onChange) {

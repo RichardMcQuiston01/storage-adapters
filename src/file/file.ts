@@ -4,18 +4,22 @@
  * of I/O, and this file imports no file system module. You pass in a
  * `FileSystemLike`; `nodeFileSystem()` from `/file/node` covers Node, Bun and Deno.
  */
+import { describeUnknownError } from '../errors.js';
 import {
+  classifyFileError,
   errorCodeOf,
   failedWithFor,
   failureFor,
   withLock,
   writeTemporaryFile,
 } from './shared.js';
-import type {
-  StorageAdapter,
-  StoredValue,
-  StoreErrorCode,
-  StoreResult,
+import {
+  compareKeys,
+  prefixFailure,
+  type StorageAdapter,
+  type StoredValue,
+  type StoreErrorCode,
+  type StoreResult,
 } from '../storage.js';
 
 /**
@@ -47,6 +51,12 @@ export interface FileSystemLike {
    * watching. A file replaced by a rename must still be noticed.
    */
   watch?(path: string, onChange: () => void): () => void;
+  /**
+   * Optional. The names (not paths) of the files in the directory, or an empty list
+   * if the directory does not exist. Needed for `list`; without it `list` reports
+   * that it is not supported.
+   */
+  listFiles?(directory: string): Promise<string[]>;
   /**
    * Optional. Calls `onChange` with the name of the file (just the name, not the
    * path) whenever something in the directory is created, changed, replaced, renamed
@@ -110,6 +120,97 @@ export function encodeKey(key: string): string | undefined {
     return undefined;
   }
   return encoded;
+}
+
+/**
+ * The key a file name stem stands for: the reverse of `encodeKey`. Returns
+ * `undefined` for a stem `encodeKey` could not have made (so a stray file in the
+ * directory is not mistaken for an entry).
+ */
+export function decodeKey(stem: string): string | undefined {
+  const bytes: number[] = [];
+  const flush = (): string | undefined => {
+    if (bytes.length === 0) {
+      return '';
+    }
+    const text: string | undefined = decodeUtf8(bytes);
+    bytes.length = 0;
+    return text;
+  };
+  let key = '';
+  for (let index = 0; index < stem.length; index += 1) {
+    const char: string = stem.charAt(index);
+    if (char === '~') {
+      const byte = Number.parseInt(stem.slice(index + 1, index + 3), 16);
+      if (!/^[0-9a-f]{2}$/.test(stem.slice(index + 1, index + 3))) {
+        return undefined;
+      }
+      bytes.push(byte);
+      index += 2;
+      continue;
+    }
+    const text: string | undefined = flush();
+    if (text === undefined) {
+      return undefined;
+    }
+    key += text;
+    if (char === '_') {
+      const letter: string = stem.charAt(index + 1);
+      if (letter < 'a' || letter > 'z') {
+        return undefined;
+      }
+      key += letter.toUpperCase();
+      index += 1;
+    } else {
+      key += char;
+    }
+  }
+  const tail: string | undefined = flush();
+  if (tail === undefined) {
+    return undefined;
+  }
+  key += tail;
+  return encodeKey(key) === stem ? key : undefined;
+}
+
+/** Strict UTF-8 decoding without `TextDecoder`; `undefined` for invalid bytes. */
+function decodeUtf8(bytes: readonly number[]): string | undefined {
+  let text = '';
+  for (let index = 0; index < bytes.length;) {
+    const first: number = bytes[index] ?? 0;
+    const length: number =
+      first < 0x80
+        ? 1
+        : first >= 0xc2 && first < 0xe0
+          ? 2
+          : first >= 0xe0 && first < 0xf0
+            ? 3
+            : first >= 0xf0 && first < 0xf5
+              ? 4
+              : 0;
+    if (length === 0 || index + length > bytes.length) {
+      return undefined;
+    }
+    let codePoint: number =
+      length === 1 ? first : first & (0xff >> (length + 1));
+    for (let offset = 1; offset < length; offset += 1) {
+      const next: number = bytes[index + offset] ?? 0;
+      if ((next & 0xc0) !== 0x80) {
+        return undefined;
+      }
+      codePoint = (codePoint << 6) | (next & 0x3f);
+    }
+    if (
+      (length === 3 && codePoint < 0x800) ||
+      (length === 4 && (codePoint < 0x10000 || codePoint > 0x10ffff)) ||
+      (codePoint >= 0xd800 && codePoint <= 0xdfff)
+    ) {
+      return undefined;
+    }
+    text += String.fromCodePoint(codePoint);
+    index += length;
+  }
+  return text;
 }
 
 function utf8Bytes(codePoint: number): number[] {
@@ -461,6 +562,48 @@ export function fileAdapter(options: FileAdapterOptions): StorageAdapter {
         }
       );
       return result;
+    },
+
+    async list(prefix, { signal }) {
+      if (signal.aborted) {
+        return prefixFailure(
+          LABEL,
+          'unavailable',
+          prefix,
+          'request to list keys was aborted'
+        );
+      }
+      if (fileSystem.listFiles === undefined) {
+        return prefixFailure(
+          LABEL,
+          'invalid',
+          prefix,
+          'cannot list keys: the file system has no listFiles method'
+        );
+      }
+      try {
+        const names: string[] = await fileSystem.listFiles(directory);
+        const keys: string[] = [];
+        for (const name of names) {
+          if (!name.endsWith(FILE_EXTENSION)) {
+            continue; // Temporary files and anything that is not ours.
+          }
+          const key: string | undefined = decodeKey(
+            name.slice(0, -FILE_EXTENSION.length)
+          );
+          if (key !== undefined && key.startsWith(prefix)) {
+            keys.push(key);
+          }
+        }
+        return { ok: true, value: keys.sort(compareKeys) };
+      } catch (error: unknown) {
+        return prefixFailure(
+          LABEL,
+          classifyFileError(error),
+          prefix,
+          `could not list keys (${describeUnknownError(error)})`
+        );
+      }
     },
 
     subscribe(key, onChange) {
