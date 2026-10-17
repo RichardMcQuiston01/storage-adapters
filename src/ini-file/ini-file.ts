@@ -3,6 +3,7 @@
  * bundled: you pass in the one you use, for example the `ini` package.
  */
 import type { FileSystemLike } from '../file/file.js';
+import type { FileLockOptions } from '../file/lock.js';
 import { documentFileAdapter } from '../document-file/document-file.js';
 import { plainLayout } from '../document-file/plain-layout.js';
 import type { StorageAdapter } from '../storage.js';
@@ -30,6 +31,11 @@ export interface IniFileAdapterOptions {
    * noticed and reported. Default `true`. Needs a `FileSystemLike` with `watch`.
    */
   readonly watch?: boolean;
+  /**
+   * Take a lock file around each write, so several processes can share the file.
+   * Needs a `FileSystemLike` with `writeNewFile`. Off by default.
+   */
+  readonly lock?: FileLockOptions;
 }
 
 /**
@@ -61,5 +67,6 @@ export function iniFileAdapter(options: IniFileAdapterOptions): StorageAdapter {
     layout: plainLayout(codec, 'INI'),
     cache: options.cache ?? true,
     watch: options.watch ?? true,
+    ...(options.lock === undefined ? {} : { lock: options.lock }),
   });
 }

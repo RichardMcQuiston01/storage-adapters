@@ -78,7 +78,7 @@ export function failedWithFor<T>(
 const MAX_TEMPORARY_ATTEMPTS = 8;
 
 /** Sixteen hex digits that are hard to guess: random bytes where the runtime has them. */
-function unguessableSuffix(): string {
+export function unguessableSuffix(): string {
   const source:
     { getRandomValues?: (bytes: Uint8Array) => Uint8Array } | undefined = (
     globalThis as {
