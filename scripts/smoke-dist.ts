@@ -20,6 +20,7 @@ import * as jsonFile from '../dist/json-file.js';
 import * as mysql from '../dist/mysql.js';
 import * as postgres from '../dist/postgres.js';
 import * as redis from '../dist/redis.js';
+import * as rest from '../dist/rest.js';
 import * as s3 from '../dist/s3.js';
 import * as sqlite from '../dist/sqlite.js';
 import * as yamlFile from '../dist/yaml-file.js';
@@ -40,6 +41,7 @@ const entries: Record<string, Record<string, unknown>> = {
   sqlite,
   postgres,
   redis,
+  rest,
   mysql,
   s3,
   file,

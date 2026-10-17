@@ -110,6 +110,16 @@
         "default": "./dist/redis.cjs"
       }
     },
+    "./rest": {
+      "import": {
+        "types": "./dist/rest.d.ts",
+        "default": "./dist/rest.js"
+      },
+      "require": {
+        "types": "./dist/rest.d.cts",
+        "default": "./dist/rest.cjs"
+      }
+    },
     "./file": {
       "import": {
         "types": "./dist/file.d.ts",
@@ -184,6 +194,9 @@
       ],
       "redis": [
         "./dist/redis.d.ts"
+      ],
+      "rest": [
+        "./dist/rest.d.ts"
       ],
       "file": [
         "./dist/file.d.ts"

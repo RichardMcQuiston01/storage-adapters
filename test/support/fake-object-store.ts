@@ -114,6 +114,12 @@ export function fakeObjectStore(
       objects.set(key, body);
       return Promise.resolve({ etag: etagOf(body) });
     },
+    listKeys: (prefix) => {
+      calls.push(`list ${prefix}`);
+      return Promise.resolve(
+        [...objects.keys()].filter((key) => key.startsWith(prefix))
+      );
+    },
     deleteObject: (key) => {
       calls.push(`delete ${key}`);
       const failure = store.failNext.delete;

@@ -1,4 +1,6 @@
 export {
+  compareKeys,
+  keysWithPrefix,
   memoryAdapter,
   readOnly,
   utf8Length,

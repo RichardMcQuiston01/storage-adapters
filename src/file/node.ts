@@ -5,7 +5,14 @@
  * its own entry point (`/file/node`) and the rest of the package stays runtime-neutral.
  */
 import { watch } from 'node:fs';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 
 import type { FileSystemLike } from './file.js';
 
@@ -20,6 +27,16 @@ export function nodeFileSystem(): FileSystemLike {
     remove: (path) => rm(path, { force: true }),
     mkdir: async (path) => {
       await mkdir(path, { recursive: true });
+    },
+    listFiles: async (directory) => {
+      try {
+        return await readdir(directory);
+      } catch (error: unknown) {
+        if ((error as { code?: unknown }).code === 'ENOENT') {
+          return []; // Nothing has been written yet.
+        }
+        throw error;
+      }
     },
     watchDirectory: (directory, onChange) => {
       const watcher = watch(directory, (_event, filename) => {

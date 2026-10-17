@@ -14,6 +14,8 @@ import {
   sqlFailure,
 } from '../sql-shared.js';
 import {
+  compareKeys,
+  prefixFailure,
   utf8Length,
   type StorageAdapter,
   type StoredValue,
@@ -64,6 +66,7 @@ interface Statements {
   readonly insert: string;
   readonly selectRevision: string;
   readonly remove: string;
+  readonly list: string;
 }
 
 /*
@@ -109,6 +112,8 @@ WHERE entry_key = ? AND revision = ?`,
       insert: `INSERT INTO ${table} (storage_entry_id, entry_key, entry_value) VALUES (UUID(), ?, ?)`,
       selectRevision: `SELECT CAST(revision AS CHAR) AS revision FROM ${table} WHERE entry_key = ?`,
       remove: `DELETE FROM ${table} WHERE entry_key = ?`,
+      // LIKE on the binary key, with '!' as the escape so the prefix's own % and _ are literal.
+      list: `SELECT CONVERT(entry_key USING utf8mb4) AS entry_key FROM ${table} WHERE entry_key LIKE ? ESCAPE '!'`,
     },
   };
 }
@@ -371,6 +376,47 @@ export function mysqlAdapter(options: MysqlAdapterOptions): StorageAdapter {
       }
       listeners.notify(key, null);
       return { ok: true, value: null };
+    },
+
+    async list(prefix, { signal }) {
+      if (signal.aborted) {
+        return prefixFailure(
+          LABEL,
+          'unavailable',
+          prefix,
+          'request to list keys was aborted'
+        );
+      }
+      if (!tableIsSafe) {
+        return prefixFailure(
+          LABEL,
+          'invalid',
+          prefix,
+          `cannot use table name "${table}": use letters, digits and underscores, with an optional schema prefix`
+        );
+      }
+      try {
+        await prepare();
+        const [rows] = await client.query(sql.statements.list, [
+          `${prefix.replace(/[!%_]/g, '!$&')}%`,
+        ]);
+        const keys: string[] = [];
+        for (const row of Array.isArray(rows) ? rows : []) {
+          const key: unknown = (row as { entry_key?: unknown } | null)
+            ?.entry_key;
+          if (typeof key === 'string') {
+            keys.push(key);
+          }
+        }
+        return { ok: true, value: keys.sort(compareKeys) };
+      } catch (error: unknown) {
+        return prefixFailure(
+          LABEL,
+          classifyError(error),
+          prefix,
+          `could not list keys (${describeUnknownError(error)})`
+        );
+      }
     },
 
     subscribe: listeners.subscribe,

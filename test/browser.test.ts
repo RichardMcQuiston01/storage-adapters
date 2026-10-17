@@ -26,6 +26,10 @@ function fakeStorage(): FakeStorage {
     removeItem: (key: string): void => {
       store.delete(key);
     },
+    get length(): number {
+      return store.size;
+    },
+    key: (index: number): string | null => [...store.keys()][index] ?? null,
   };
 }
 

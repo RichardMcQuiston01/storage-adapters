@@ -10,11 +10,13 @@ import {
   revisionText,
   sqlFailure,
 } from '../sql-shared.js';
-import type {
-  StorageAdapter,
-  StoredValue,
-  StoreErrorCode,
-  StoreResult,
+import {
+  compareKeys,
+  prefixFailure,
+  type StorageAdapter,
+  type StoredValue,
+  type StoreErrorCode,
+  type StoreResult,
 } from '../storage.js';
 
 /**
@@ -414,6 +416,65 @@ export function redisAdapter(options: RedisAdapterOptions): StorageAdapter {
       }
       listeners.notify(key, null);
       return { ok: true, value: null };
+    },
+
+    async list(keyPrefix, { signal }) {
+      if (signal.aborted) {
+        return prefixFailure(
+          LABEL,
+          'unavailable',
+          keyPrefix,
+          'request to list keys was aborted'
+        );
+      }
+      try {
+        // SCAN walks the whole keyspace a page at a time, never blocking the server
+        // as KEYS would. Glob characters in the prefix are escaped so they match
+        // themselves. A key can come back more than once, so collect into a set.
+        const pattern = `${redisKey(keyPrefix).replace(/[\\*?[\]]/g, '\\$&')}*`;
+        const found = new Set<string>();
+        let cursor = '0';
+        do {
+          const reply: unknown = await client.command([
+            'SCAN',
+            cursor,
+            'MATCH',
+            pattern,
+            'COUNT',
+            '1000',
+          ]);
+          const [next, page]: unknown[] = Array.isArray(reply)
+            ? (reply as unknown[])
+            : [];
+          if (typeof next !== 'string' || !Array.isArray(page)) {
+            return prefixFailure(
+              LABEL,
+              'corrupt',
+              keyPrefix,
+              'answered SCAN with something that is not a cursor and a list of keys'
+            );
+          }
+          for (const redisName of page) {
+            if (typeof redisName === 'string' && redisName.startsWith(prefix)) {
+              found.add(redisName.slice(prefix.length));
+            }
+          }
+          cursor = next;
+        } while (cursor !== '0');
+        return {
+          ok: true,
+          value: [...found]
+            .filter((key) => key.startsWith(keyPrefix))
+            .sort(compareKeys),
+        };
+      } catch (error: unknown) {
+        return prefixFailure(
+          LABEL,
+          classifyError(error),
+          keyPrefix,
+          `could not list keys (${describeUnknownError(error)})`
+        );
+      }
     },
 
     subscribe(key, onChange) {
