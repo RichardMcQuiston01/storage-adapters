@@ -1,5 +1,0 @@
----
-'@richardmcquiston01/storage-adapters': minor
----
-
-Add an optional `list(prefix, { signal })` to `StorageAdapter`: it resolves the keys that start with `prefix` (`''` for all), sorted in code-unit order, as plain text (never a pattern), to list or clear a namespace. `memoryAdapter`, the browser adapters, IndexedDB, SQLite, PostgreSQL, MySQL, Redis (`SCAN`), S3 (`ListObjectsV2`), the file adapter and the JSON, YAML and INI adapters all have it, and the wrappers pass it through (`withPrefix` strips its prefix, `withFallback` merges both stores, `withRetry` retries it, `withLogging` reports it as operation `list` with the prefix as `key`). An adapter that cannot list answers `invalid` and says what it lacks. New optional pieces of the interfaces they sit on: `FileSystemLike.listFiles` (`nodeFileSystem()` has it), `SqliteStatementLike.all`, `WebStorageLike.length` and `key()`, `IdbObjectStoreLike.getAllKeys`, `ObjectStoreLike.listKeys` and `AwsSdkCommands.ListObjectsV2Command`. Also exports `compareKeys` and `keysWithPrefix` for adapters of your own.
