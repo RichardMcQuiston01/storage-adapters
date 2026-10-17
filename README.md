@@ -409,17 +409,39 @@ there first. A full disk is `quota`, a permission error is `forbidden`, a file t
 is not an entry is `corrupt`, and nothing throws. A crash can leave a `*.tmp` file
 behind; it is safe to delete.
 
-**Use one process per directory.** The queue lives in the process, so two
-processes writing the same directory can lose updates. In a test with four
-processes each adding 1 to a shared counter 40 times, about half of the additions
-were lost. Use the SQLite adapter when more than one process writes. The adapter
-does not `fsync`, so a power failure shortly after a write can lose it.
-`subscribe` reports changes made through adapters in this process and, when the
-file system can watch a directory (`nodeFileSystem()` can), files that another
-process or a person changes, writes, replaces or deletes. It stays quiet for a
-file that did not change and for half-written files, and the folder is watched only
-while someone is subscribed. Hearing about another process's write does not make
-two writers safe; the warning above still applies.
+**Use one process per directory, or turn on the lock.** By default the write queue
+lives in the process, so two processes writing the same directory can lose updates:
+in a test with four processes each adding 1 to a shared counter 25 times, 66 of the 100
+additions were lost. Pass `lock` and every write first takes a lock file next to its
+key (`<key>.json.lock`), made with an exclusive create, so processes take turns and
+`ifRevision` is checked against what the other process just wrote. The same test with
+the lock loses none.
+
+```ts
+const adapter: StorageAdapter = fileAdapter({
+  directory: './data',
+  fileSystem: nodeFileSystem(),
+  lock: {
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)), // you pass the timer
+    // optional: staleMs 30000, timeoutMs 10000, retryMs 25
+  },
+});
+```
+
+A process that cannot get the lock within `timeoutMs` gets `unavailable` with the lock
+file's name, and nothing is written. A lock older than `staleMs` is taken to belong to
+a process that died and is broken; only the lock that was judged stale is removed, and
+a lock is released only if it is still the one this write took. The lock needs a
+`FileSystemLike` with `writeNewFile` (`nodeFileSystem()` has it) and a file system where
+exclusive create is atomic: local disks are, some network file systems are not. A
+process that stalls for longer than `staleMs` while holding a lock can lose it, and the
+lock is advisory: it protects writers that all use it. Reads need no lock, because a
+write replaces the file in one step. The adapter does not `fsync`, so a power failure
+shortly after a write can lose it. `subscribe` reports changes made through adapters in
+this process and, when the file system can watch a directory (`nodeFileSystem()` can),
+files that another process or a person changes, writes, replaces or deletes. It stays
+quiet for a file that did not change and for half-written files, and the folder is
+watched only while someone is subscribed.
 
 #### JSON file storage
 
@@ -476,9 +498,9 @@ Choose by how much data you have and who writes it:
 
 | Adapter | Good for | Limit |
 | --- | --- | --- |
-| `jsonFileAdapter` | Settings a person may edit by hand | Rewrites the whole file on each write; one process |
-| `yamlFileAdapter`, `iniFileAdapter` | Settings a person edits by hand in YAML or INI | Rewrites the whole file and drops comments; one process |
-| `fileAdapter` | Many or large values | One process per directory |
+| `jsonFileAdapter` | Settings a person may edit by hand | Rewrites the whole file on each write; one process unless `lock` is set |
+| `yamlFileAdapter`, `iniFileAdapter` | Settings a person edits by hand in YAML or INI | Rewrites the whole file and drops comments; one process unless `lock` is set |
+| `fileAdapter` | Many or large values | One process per directory unless `lock` is set |
 | `sqliteAdapter` | Several processes writing | Needs a SQLite driver |
 | `postgresAdapter`, `mysqlAdapter` | Several servers sharing one database | Needs a driver and a running server |
 | `restAdapter` | Values kept behind your own HTTP API | One request per call; you provide the API |
@@ -544,7 +566,7 @@ code (the `yaml` package's `parse` is safe).
 
 **The adapter rewrites the whole file when it writes, and does not keep comments or
 layout.** Comments are safe only while the program just reads the file; the first
-write removes them. Like the other file adapters, it is safe within one process only.
+write removes them. Like the other file adapters, it is safe within one process unless you pass `lock` (a lock file beside the document, `<file>.lock`, with the same options and limits as the file adapter's), which lets several processes share it.
 
 #### Typed persistence
 

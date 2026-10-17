@@ -5,6 +5,7 @@
  * `FileSystemLike`; `nodeFileSystem()` from `/file/node` covers Node, Bun and Deno.
  */
 import { describeUnknownError } from '../errors.js';
+import { lockedTask, type FileLockOptions } from './lock.js';
 import {
   classifyFileError,
   errorCodeOf,
@@ -74,6 +75,12 @@ export interface FileAdapterOptions {
   /** Where the files go. Created on first use. */
   readonly directory: string;
   readonly fileSystem: FileSystemLike;
+  /**
+   * Makes a write take a lock file first, so several processes can share the
+   * directory without losing updates. Needs a `FileSystemLike` with `writeNewFile`.
+   * Off by default, which keeps the one-process-per-directory rule. See `FileLockOptions`.
+   */
+  readonly lock?: FileLockOptions;
 }
 
 /** What is written to each file: the value plus a counter used as its revision. */
@@ -494,48 +501,58 @@ export function fileAdapter(options: FileAdapterOptions): StorageAdapter {
       const path: string = pathOf(stem);
       const result: StoreResult<StoredValue> = await withLock(
         `${directory}\u0000${stem}`,
-        async (): Promise<StoreResult<StoredValue>> => {
-          let temporaryPath: string | null = null;
-          try {
-            await ensureDirectory();
-            // A corrupt file is replaced, so it counts as nothing stored.
-            const existing: Envelope | null =
-              (await readEnvelope(path)) ?? null;
-            if (
-              ifRevision !== undefined &&
-              existing !== null &&
-              existing.r !== ifRevision
-            ) {
-              return failure(
-                'conflict',
-                key,
-                `holds revision ${existing.r}, but revision ${ifRevision} was expected`
-              );
-            }
-            const revision: string = String((Number(existing?.r) || 0) + 1);
-            const envelope: Envelope = { r: revision, v: value };
-            temporaryPath = await writeTemporaryFile(
-              fileSystem,
-              path,
-              JSON.stringify(envelope)
-            );
-            await fileSystem.rename(temporaryPath, path);
-            temporaryPath = null;
-            // Announced while the key is still locked, so a watcher that reads the
-            // file next finds this already reported and says nothing more.
-            notify(key, { value, revision });
-            return { ok: true, value: { value, revision } };
-          } catch (error: unknown) {
-            if (temporaryPath !== null) {
-              try {
-                await fileSystem.remove(temporaryPath);
-              } catch {
-                // The leftover temporary file is harmless; the write already failed.
+        lockedTask<StoredValue>(
+          {
+            fileSystem,
+            lock: options.lock,
+            lockPath: `${path}.lock`,
+            signal,
+            prepare: ensureDirectory,
+            fail: (error) => failedWith(error, key, 'written'),
+          },
+          async (): Promise<StoreResult<StoredValue>> => {
+            let temporaryPath: string | null = null;
+            try {
+              await ensureDirectory();
+              // A corrupt file is replaced, so it counts as nothing stored.
+              const existing: Envelope | null =
+                (await readEnvelope(path)) ?? null;
+              if (
+                ifRevision !== undefined &&
+                existing !== null &&
+                existing.r !== ifRevision
+              ) {
+                return failure(
+                  'conflict',
+                  key,
+                  `holds revision ${existing.r}, but revision ${ifRevision} was expected`
+                );
               }
+              const revision: string = String((Number(existing?.r) || 0) + 1);
+              const envelope: Envelope = { r: revision, v: value };
+              temporaryPath = await writeTemporaryFile(
+                fileSystem,
+                path,
+                JSON.stringify(envelope)
+              );
+              await fileSystem.rename(temporaryPath, path);
+              temporaryPath = null;
+              // Announced while the key is still locked, so a watcher that reads the
+              // file next finds this already reported and says nothing more.
+              notify(key, { value, revision });
+              return { ok: true, value: { value, revision } };
+            } catch (error: unknown) {
+              if (temporaryPath !== null) {
+                try {
+                  await fileSystem.remove(temporaryPath);
+                } catch {
+                  // The leftover temporary file is harmless; the write already failed.
+                }
+              }
+              return failedWith(error, key, 'written');
             }
-            return failedWith(error, key, 'written');
           }
-        }
+        )
       );
       return result;
     },
@@ -551,15 +568,25 @@ export function fileAdapter(options: FileAdapterOptions): StorageAdapter {
       }
       const result: StoreResult<null> = await withLock(
         `${directory}\u0000${stem}`,
-        async (): Promise<StoreResult<null>> => {
-          try {
-            await fileSystem.remove(pathOf(stem));
-            notify(key, null);
-            return { ok: true, value: null };
-          } catch (error: unknown) {
-            return failedWith(error, key, 'removed');
+        lockedTask<null>(
+          {
+            fileSystem,
+            lock: options.lock,
+            lockPath: `${pathOf(stem)}.lock`,
+            signal,
+            prepare: ensureDirectory,
+            fail: (error) => failedWith(error, key, 'removed'),
+          },
+          async (): Promise<StoreResult<null>> => {
+            try {
+              await fileSystem.remove(pathOf(stem));
+              notify(key, null);
+              return { ok: true, value: null };
+            } catch (error: unknown) {
+              return failedWith(error, key, 'removed');
+            }
           }
-        }
+        )
       );
       return result;
     },

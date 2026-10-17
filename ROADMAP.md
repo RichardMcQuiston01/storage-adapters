@@ -46,8 +46,6 @@
 
 1. **Chromium in CI.** Move the real-browser checks for localStorage,
    sessionStorage and IndexedDB into the repository and run them in CI.
-2. **Cross-process locking for the file adapters.** An optional lock file so
-   several processes can share one directory or document safely.
 
 ## Eventually
 

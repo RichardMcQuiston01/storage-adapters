@@ -4,6 +4,7 @@
  * (`nodeFileSystem()` from `/file/node` covers Node, Bun and Deno).
  */
 import type { FileSystemLike } from '../file/file.js';
+import type { FileLockOptions } from '../file/lock.js';
 import type { StorageAdapter, StoredValue } from '../storage.js';
 import {
   documentFileAdapter,
@@ -25,6 +26,11 @@ export interface JsonFileAdapterOptions {
    * noticed and reported. Default `true`. Needs a `FileSystemLike` with `watch`.
    */
   readonly watch?: boolean;
+  /**
+   * Take a lock file around each write, so several processes can share the file.
+   * Needs a `FileSystemLike` with `writeNewFile`. Off by default.
+   */
+  readonly lock?: FileLockOptions;
 }
 
 /** Each entry is `{ "r": revision, "v": value }`, a counter revision beside the value. */
@@ -72,5 +78,6 @@ export function jsonFileAdapter(
     layout: jsonLayout,
     cache: options.cache ?? true,
     watch: options.watch ?? true,
+    ...(options.lock === undefined ? {} : { lock: options.lock }),
   });
 }
