@@ -1,6 +1,6 @@
 {
   "name": "@richardmcquiston01/storage-adapters",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value contract with typed errors and revisions, composable wrappers (prefix, fallback, retry, cache, encoding), and a generic persistence helper with conflict handling. No I/O in the core.",
   "keywords": [
     "typescript",

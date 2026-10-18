@@ -27,6 +27,9 @@
   adapters (`lock` option); Windows rename retries in `nodeFileSystem()`.
 - **0.11.0**: the `/firebase` entry point with `firestoreAdapter()` (Admin SDK
   and web SDK wrappers, tested against the Firestore emulator in CI).
+- **0.12.0**: the `/supabase` entry point with `supabaseAdapter()` and
+  `supabaseSetupSql()` (tested against PostgreSQL and PostgREST through the
+  real `supabase-js` in CI; Realtime covered with a fake channel).
 
 ## Ground rules for every new adapter
 
