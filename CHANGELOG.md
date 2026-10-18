@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.15.0
+
+### Minor Changes
+
+- 4ba153a: `yamlFileAdapter` now keeps the comments, key order and blank lines of the file when it writes. When the YAML library has `parseDocument` (the `yaml` package does), a write changes only the entry it is about: a new key is added at the end, a removed key takes its own comments with it, and a number or boolean stays one when the new text still reads as one. The result is read back and checked, and if keeping the layout would change another entry (an anchor and its alias, for example) the file is written fresh, without comments, as before. New option `keepComments` (default `true`; `false` writes the file fresh, sorted by key, as before) and exported type `YamlDocumentLike`; `parseDocument` is an optional member of `YamlLike`. A YAML file that holds only comments is now an empty document instead of `corrupt`. `iniFileAdapter` is unchanged and still drops comments. Existing files written by this adapter keep working; the visible difference is that YAML files are no longer re-sorted on every write.
+- 4394998: New optional `/react` entry point with the `useStoredValue(adapter, key)` hook. It returns `{ status, value, revision, error, set, remove, refresh }`: it reads the key, follows changes other tabs or processes make when the adapter can `subscribe` (a change heard during the first read wins over that read), and its `set`, `remove` and `refresh` resolve with the adapter's `StoreResult`. Unmounting stops the listener and cancels the read; stale answers for an old key are ignored; an adapter that rejects is reported as an `unavailable` error instead of throwing into the component. React 18 or later is an optional peer dependency of this entry point only; the rest of the package is unchanged.
+
 ## 0.14.0
 
 ### Minor Changes
