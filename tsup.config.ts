@@ -13,6 +13,7 @@ export default defineConfig({
     s3: 'src/s3/index.ts',
     redis: 'src/redis/index.ts',
     rest: 'src/rest/index.ts',
+    firebase: 'src/firebase/index.ts',
     file: 'src/file/index.ts',
     'file-node': 'src/file/node.ts',
     'json-file': 'src/json-file/index.ts',

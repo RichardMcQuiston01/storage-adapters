@@ -22,6 +22,11 @@
 - **0.9.0**: the `/redis` entry point with `redisAdapter()`; `fileAdapter`
   reports other processes' changes; fixes for fourteen bugs found in review;
   CI actions pinned to commit SHAs.
+- **0.10.0**: optional `list(prefix)` on every adapter and wrapper; the `/rest`
+  entry point with `restAdapter()`; cross-process locking for the file
+  adapters (`lock` option); Windows rename retries in `nodeFileSystem()`.
+- **0.11.0**: the `/firebase` entry point with `firestoreAdapter()` (Admin SDK
+  and web SDK wrappers, tested against the Firestore emulator in CI).
 
 ## Ground rules for every new adapter
 
@@ -52,12 +57,6 @@
 Cloud and server backends. They follow the adapters above and reuse the shared
 conformance suite.
 
-- **Firebase adapter** (`/firebase`). Firestore first, with one document per
-  key. A transaction makes the revision check atomic, and `onSnapshot` powers
-  `subscribe`. The Realtime Database can follow if there is demand. The
-  Firebase SDK is an optional peer dependency, and security rules stay the
-  consumer's job.
-
 - **Supabase adapter** (`/supabase`). Supabase is PostgreSQL, so the table and
   atomic revision check from `postgresAdapter` carry over, reached through the
   `supabase-js` client (PostgREST, or an RPC function for the conditional write)
@@ -66,6 +65,10 @@ conformance suite.
   consumer's job. The `supabase-js` client is an optional peer dependency.
 
 ## Later
+
+- A Firebase Realtime Database adapter, if there is demand. The Firestore
+  adapter (`/firebase`) is built; the Realtime Database is a different API
+  (a JSON tree, `runTransaction` on a node, `onValue`).
 
 - Try `s3Adapter` against more services (MinIO, Cloudflare R2, DigitalOcean
   Spaces) and note which enforce `If-Match`. It was tested against Amazon S3's
