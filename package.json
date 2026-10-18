@@ -200,6 +200,16 @@
         "default": "./dist/ini-file.cjs"
       }
     },
+    "./react": {
+      "import": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.js"
+      },
+      "require": {
+        "types": "./dist/react.d.cts",
+        "default": "./dist/react.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -251,6 +261,9 @@
       ],
       "ini-file": [
         "./dist/ini-file.d.ts"
+      ],
+      "react": [
+        "./dist/react.d.ts"
       ]
     }
   },
@@ -279,6 +292,14 @@
     "changeset": "changeset",
     "version-packages": "changeset version"
   },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.1152.0",
     "@changesets/cli": "^3.0.3",
@@ -288,6 +309,7 @@
     "@supabase/supabase-js": "^2.118.0",
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
+    "@types/react": "^19",
     "eslint": "^10.12.0",
     "fake-indexeddb": "^6.2.5",
     "firebase": "^13.0.0",
@@ -299,6 +321,8 @@
     "pg": "^8.23.1",
     "playwright-core": "1.56.1",
     "prettier": "^3.9.9",
+    "react": "^19",
+    "react-test-renderer": "^19",
     "redis": "^6.3.0",
     "tsup": "^8.5.1",
     "typescript": "~6.0.2",
