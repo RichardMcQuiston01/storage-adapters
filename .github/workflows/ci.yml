@@ -137,6 +137,37 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun test test/s3.test.ts test/s3-server.test.ts
 
+  # The S3 adapter against MinIO, a second real S3 server that enforces If-Match and
+  # If-None-Match itself. MinIO no longer publishes binaries, so it is built from the
+  # source commit pinned below (the default test run skips this).
+  minio:
+    runs-on: ubuntu-latest
+    env:
+      TEST_S3_ENDPOINT: http://127.0.0.1:9100
+      TEST_S3_ACCESS_KEY_ID: minioadmin
+      TEST_S3_SECRET_ACCESS_KEY: minioadmin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - name: Build MinIO
+        run: GOBIN="$RUNNER_TEMP/minio-bin" go install github.com/minio/minio@7aac2a2c5b7c
+      - name: Start MinIO
+        run: |
+          mkdir -p "$RUNNER_TEMP/minio-data"
+          MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin \
+            nohup "$RUNNER_TEMP/minio-bin/minio" server "$RUNNER_TEMP/minio-data" \
+            --address 127.0.0.1:9100 --console-address 127.0.0.1:9101 \
+            > "$RUNNER_TEMP/minio.log" 2>&1 &
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://127.0.0.1:9100/minio/health/live && exit 0
+            sleep 1
+          done
+          echo "MinIO did not start" && cat "$RUNNER_TEMP/minio.log" && exit 1
+      - run: bun install --frozen-lockfile
+      - run: bun test test/s3.test.ts test/s3-server.test.ts
+
   # The Firestore adapter, against the Firestore emulator, through both SDKs. The
   # default test run skips this (it uses an in-memory collection). The emulator needs
   # Java 21, which the runner has installed but does not make the default.
