@@ -27,6 +27,9 @@
   adapters (`lock` option); Windows rename retries in `nodeFileSystem()`.
 - **0.11.0**: the `/firebase` entry point with `firestoreAdapter()` (Admin SDK
   and web SDK wrappers, tested against the Firestore emulator in CI).
+- **0.12.0**: the `/supabase` entry point with `supabaseAdapter()` and
+  `supabaseSetupSql()` (tested against PostgreSQL and PostgREST through the
+  real `supabase-js` in CI; Realtime covered with a fake channel).
 
 ## Ground rules for every new adapter
 
@@ -51,18 +54,6 @@
 
 1. **Chromium in CI.** Move the real-browser checks for localStorage,
    sessionStorage and IndexedDB into the repository and run them in CI.
-
-## Eventually
-
-Cloud and server backends. They follow the adapters above and reuse the shared
-conformance suite.
-
-- **Supabase adapter** (`/supabase`). Supabase is PostgreSQL, so the table and
-  atomic revision check from `postgresAdapter` carry over, reached through the
-  `supabase-js` client (PostgREST, or an RPC function for the conditional write)
-  instead of a direct connection. Realtime (`postgres_changes`) can power
-  `subscribe` for writes by other clients. Row-level security policies stay the
-  consumer's job. The `supabase-js` client is an optional peer dependency.
 
 ## Later
 

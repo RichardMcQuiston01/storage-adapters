@@ -1,6 +1,6 @@
 {
   "name": "@richardmcquiston01/storage-adapters",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value contract with typed errors and revisions, composable wrappers (prefix, fallback, retry, cache, encoding), and a generic persistence helper with conflict handling. No I/O in the core.",
   "keywords": [
     "typescript",
@@ -130,6 +130,16 @@
         "default": "./dist/firebase.cjs"
       }
     },
+    "./supabase": {
+      "import": {
+        "types": "./dist/supabase.d.ts",
+        "default": "./dist/supabase.js"
+      },
+      "require": {
+        "types": "./dist/supabase.d.cts",
+        "default": "./dist/supabase.cjs"
+      }
+    },
     "./file": {
       "import": {
         "types": "./dist/file.d.ts",
@@ -211,6 +221,9 @@
       "firebase": [
         "./dist/firebase.d.ts"
       ],
+      "supabase": [
+        "./dist/supabase.d.ts"
+      ],
       "file": [
         "./dist/file.d.ts"
       ],
@@ -258,6 +271,7 @@
     "@electric-sql/pglite": "^0.5.10",
     "@eslint/js": "^10.0.1",
     "@google-cloud/firestore": "^9.3.1",
+    "@supabase/supabase-js": "^2.118.0",
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
     "eslint": "^10.12.0",
