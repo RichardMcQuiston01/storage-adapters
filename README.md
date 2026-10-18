@@ -308,7 +308,7 @@ key with every character except letters, digits and `-` written as `%XX`, becaus
 Firestore ids cannot hold `/`, `.`, `..` or `__name__`; the key itself is kept in the
 `key` field, which is what `list` queries. A write is a transaction that reads the
 document and then writes it, so two clients racing with the same `ifRevision` cannot
-both win: one gets `conflict`. A key with nothing stored is created. Rules or IAM that
+both win: one gets `conflict`. Writes to one key through one adapter run in turn (transactions that read and write the same document wait on each other's locks and retry with a back-off, so many at once can take seconds); writers in other processes still race, and the SDK retries those. A key with nothing stored is created. Rules or IAM that
 refuse the call are `forbidden`, a quota or rate limit is `quota`, a key or value
 Firestore cannot hold is `invalid` (an empty key, an id over 1,500 bytes, a value near
 1 MiB), a document that is not a stored entry is `corrupt`, anything else, a network
