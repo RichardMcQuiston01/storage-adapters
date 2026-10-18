@@ -164,3 +164,59 @@ jobs:
           echo "the Firestore emulator did not start" && cat "$RUNNER_TEMP/firestore.log" && exit 1
       - run: bun install --frozen-lockfile
       - run: bun test test/firestore.test.ts test/firestore-emulator.test.ts
+
+  # The Supabase adapter, against a real PostgreSQL server and a real PostgREST (the
+  # REST layer Supabase puts in front of its database), through the real supabase-js.
+  # The default test run skips this (it uses an in-memory client). Realtime needs
+  # Supabase's own server, so it is covered with a fake channel in the default run.
+  supabase:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_SUPABASE_DB_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      TEST_SUPABASE_REST_URL: http://127.0.0.1:3010
+      TEST_SUPABASE_JWT_SECRET: test-only-secret-of-at-least-32-characters
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - name: Create the API roles
+        run: |
+          psql "$TEST_SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f test/support/supabase-local.sql
+          psql "$TEST_SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "alter role authenticator password 'authenticator'"
+      - name: Start PostgREST
+        env:
+          POSTGREST_VERSION: 12.2.3
+          POSTGREST_SHA256: 9f71269e61ac3a940281e93ff415760f5957e430e475ba4c3889f3ede7d5527c
+          PGRST_DB_URI: postgres://authenticator:authenticator@127.0.0.1:5432/postgres
+          PGRST_DB_SCHEMAS: public
+          PGRST_DB_ANON_ROLE: anon
+          PGRST_DB_MAX_ROWS: '1000'
+          PGRST_JWT_SECRET: ${{ env.TEST_SUPABASE_JWT_SECRET }}
+          PGRST_SERVER_HOST: 127.0.0.1
+          PGRST_SERVER_PORT: '3010'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/postgrest.tar.xz" \
+            "https://github.com/PostgREST/postgrest/releases/download/v${POSTGREST_VERSION}/postgrest-v${POSTGREST_VERSION}-linux-static-x64.tar.xz"
+          echo "${POSTGREST_SHA256}  $RUNNER_TEMP/postgrest.tar.xz" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/postgrest.tar.xz" -C "$RUNNER_TEMP"
+          nohup "$RUNNER_TEMP/postgrest" > "$RUNNER_TEMP/postgrest.log" 2>&1 &
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://127.0.0.1:3010/ && exit 0
+            sleep 1
+          done
+          echo "PostgREST did not start" && cat "$RUNNER_TEMP/postgrest.log" && exit 1
+      - run: bun install --frozen-lockfile
+      - run: bun test test/supabase.test.ts test/supabase-postgrest.test.ts

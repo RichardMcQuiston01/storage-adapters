@@ -24,6 +24,7 @@ import * as redis from '../dist/redis.js';
 import * as rest from '../dist/rest.js';
 import * as s3 from '../dist/s3.js';
 import * as sqlite from '../dist/sqlite.js';
+import * as supabase from '../dist/supabase.js';
 import * as yamlFile from '../dist/yaml-file.js';
 import * as indexeddb from '../dist/indexeddb.js';
 
@@ -44,6 +45,7 @@ const entries: Record<string, Record<string, unknown>> = {
   redis,
   rest,
   firebase,
+  supabase,
   mysql,
   s3,
   file,
