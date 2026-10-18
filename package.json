@@ -255,7 +255,7 @@
     "build": "tsup",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
     "test": "bun test test",
-    "test:browser": "bun run build && TEST_CHROMIUM=1 bun test test/browser-chromium.test.ts",
+    "test:browser": "bun run build && TEST_BROWSER=${TEST_BROWSER:-chromium} bun test test/browser-real.test.ts",
     "test:deno": "deno test --allow-all --unstable-sloppy-imports --no-check test/",
     "smoke:dist": "bun scripts/smoke-dist.ts",
     "check:s3": "bun scripts/check-s3.ts",
