@@ -106,7 +106,7 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      - run: bun test test/databases.test.ts test/postgres.test.ts test/mysql.test.ts test/redis.test.ts
+      - run: bun test test/databases.test.ts test/postgres.test.ts test/postgres-listen.test.ts test/mysql.test.ts test/redis.test.ts
 
   # The S3 adapter, against an S3-compatible server. The default test run skips these
   # (it uses an in-memory store). moto implements S3's conditional writes, so it
