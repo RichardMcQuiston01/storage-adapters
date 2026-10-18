@@ -79,7 +79,7 @@ that cannot list answers `invalid` and says why: the file adapter needs a
 `FileSystemLike` with `listFiles` (`nodeFileSystem()` has it), SQLite needs a statement
 with `all()`, the browser adapters need a storage with `length` and `key()` (the real
 ones have both), IndexedDB needs `getAllKeys`, and S3 needs an object store with
-`listKeys` (`awsSdkObjectStore` has it when you also pass `ListObjectsV2Command`), and Firestore needs a store with `listKeys` (both wrappers have it). The
+`listKeys` (`awsSdkObjectStore` has it when you also pass `ListObjectsV2Command`), and Firestore needs a store with `listKeys` (both wrappers have it), and Supabase needs the `<table>_list` function from the setup SQL. The
 browser adapters list only keys that hold one of their own envelopes, since the
 storage is shared with the page; Redis lists every key under its `prefix`, so give it
 one. Keys the adapter holds are the same as `get` would find: a corrupt document entry
@@ -321,6 +321,69 @@ not reported as a change. If a listener stops (for example, rules that refuse re
 subscribes again. `list(prefix)` is a range query on `key`, so it needs no index.
 Security rules stay your job; the adapter only needs to read, write and delete
 documents in its collection, and to query it for `list`.
+
+#### Supabase storage
+
+For apps on Supabase, use `supabaseAdapter` from the optional `/supabase` entry point.
+Supabase is PostgreSQL behind PostgREST, so this is the table and the atomic revision
+check of `postgresAdapter`, reached through the `supabase-js` client instead of a
+direct connection. It imports no SDK: create the client and pass it in.
+
+Run the setup SQL once, in the SQL editor or as a migration. `supabaseSetupSql()`
+returns it as text (print it, or save it into `supabase/migrations`):
+
+```ts
+import { supabaseSetupSql } from '@richardmcquiston01/storage-adapters/supabase';
+
+console.log(supabaseSetupSql()); // or supabaseSetupSql({ table: 'app_setting' })
+```
+
+It creates the table (one row per key, with a UUID id, the value, a counter `revision`
+and `created_at` and `updated_at`), turns on row-level security with no policies,
+makes the key's unique index the replica identity and adds the table to the
+`supabase_realtime` publication (both for `subscribe`), and creates two functions that the adapter calls
+through `rpc`: `<table>_set`, which checks the revision and writes in one statement,
+and `<table>_list`. It is safe to run again.
+
+```ts
+import { createClient } from '@supabase/supabase-js';
+import { supabaseAdapter } from '@richardmcquiston01/storage-adapters/supabase';
+
+const client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const adapter: StorageAdapter = supabaseAdapter({
+  client,
+  table: 'storage_entry', // the default; the table made by the setup SQL
+  schema: 'public', // the default; used for Realtime
+  onWatchError: (message) => console.warn(message), // optional
+});
+```
+
+Two writers racing with the same `ifRevision` cannot both win: the function writes
+only if the stored revision matches, so one gets `conflict`, and a key with nothing
+stored is created. Row-level security stays your job. With the service-role key (on a
+server) policies are bypassed; with the anon or a user's key you need policies on the
+table, for example `using (entry_key like 'user:' || auth.uid() || ':%')`. Without a
+select policy a read looks like nothing stored, and a write without an insert or
+update policy is `forbidden`. An expired or wrong key is `forbidden`, a quota or rate
+limit is `quota`, a table or function that is not there is `invalid` and says to run
+`supabaseSetupSql()`, text PostgreSQL cannot hold (a NUL) is `invalid`, and anything
+else, a network failure included, is `unavailable`. Nothing throws. `supabase-js`
+itself retries a failed read a few times with a back-off; pass `db: { retry: false }`
+to `createClient` if you want failures at once.
+
+`list` calls `<table>_list` and keeps asking from where the last answer ended until
+the server has nothing more, so it works whatever the project's row limit (Supabase's
+is 1000 per response).
+
+`subscribe` reports your own writes and, through one Realtime `postgres_changes`
+channel on the table, changes other clients make, for as long as anyone is
+subscribed; the channel closes with the last subscriber. Each change is reported once.
+Every client that can read the table receives every change to it (a delete tells
+them only the key, because Realtime does not apply row-level security to deletes), so
+this suits small stores such as settings, not a busy table. If the channel cannot join (usually the
+table is not in the `supabase_realtime` publication) or a delete arrives without its
+key (the replica identity is not the key's index), `onWatchError(message)` says so; writes
+through the adapter are still reported.
 
 #### REST storage
 
@@ -667,7 +730,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 
