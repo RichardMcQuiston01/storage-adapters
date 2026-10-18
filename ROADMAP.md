@@ -50,12 +50,10 @@
 - Each adapter is added to `test/conformance.test.ts`, which runs the shared
   contract suite (`test/support/conformance.ts`) against it.
 
-## Next
-
-1. **Chromium in CI.** Move the real-browser checks for localStorage,
-   sessionStorage and IndexedDB into the repository and run them in CI.
-
 ## Later
+
+- Run `test/browser-chromium.test.ts` in Firefox and WebKit too (Playwright can
+  launch both). Chromium is the only browser the real-browser tests cover.
 
 - A Firebase Realtime Database adapter, if there is demand. The Firestore
   adapter (`/firebase`) is built; the Realtime Database is a different API
