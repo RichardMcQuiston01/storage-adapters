@@ -63,6 +63,8 @@ async function withDirectory(
 interface Flavor {
   readonly name: string;
   readonly label: string;
+  /** True when a write keeps the file's comments and key order (YAML). */
+  readonly keepsLayout: boolean;
   readonly file: string;
   readonly create: (
     path: string,
@@ -124,6 +126,7 @@ const flavors: readonly Flavor[] = [
   {
     name: 'YAML',
     label: 'YAML file',
+    keepsLayout: true,
     file: 'settings.yaml',
     create: (path, fileSystem, extra = {}) =>
       yamlFileAdapter({ path, fileSystem, yaml: YAML, ...extra }),
@@ -179,6 +182,7 @@ const flavors: readonly Flavor[] = [
   {
     name: 'INI',
     label: 'INI file',
+    keepsLayout: false,
     file: 'settings.ini',
     create: (path, fileSystem, extra = {}) =>
       iniFileAdapter({ path, fileSystem, ini, ...extra }),
@@ -263,7 +267,7 @@ for (const flavor of flavors) {
         );
       }));
 
-    void it('keeps plain entries in the file, sorted, with no revision beside them', () =>
+    void it('keeps plain entries in the file, in a steady order, with no revision beside them', () =>
       withDirectory(async (directory) => {
         const { adapter, path } = make(directory);
         expectOk(await adapter.set('zebra', 'last', { signal }));
@@ -273,7 +277,11 @@ for (const flavor of flavors) {
           unknown
         >;
         assert.deepEqual(parsed, { apple: 'first', zebra: 'last' });
-        assert.deepEqual(Object.keys(parsed), ['apple', 'zebra']);
+        // INI is written sorted; YAML keeps the order of the file and adds new keys last.
+        assert.deepEqual(
+          Object.keys(parsed),
+          flavor.keepsLayout ? ['zebra', 'apple'] : ['apple', 'zebra']
+        );
         assert.deepEqual(readdirSync(join(directory, 'conf')), [flavor.file]);
       }));
 
@@ -334,16 +342,24 @@ for (const flavor of flavors) {
         assert.deepEqual(replaced, { ...after, [unusable]: 'now plain' });
       }));
 
-    void it('does not keep comments or layout when it writes the file', () =>
-      withDirectory(async (directory) => {
-        const path = join(directory, flavor.file);
-        writeFileSync(path, flavor.handWritten);
-        const adapter = flavor.create(path, nodeFileSystem());
-        expectOk(await adapter.set('name', 'light', { signal }));
-        const text = readFileSync(path, 'utf8');
-        assert.ok(!text.includes('Settings for the app'));
-        assert.ok(!text.includes('inline comment'));
-      }));
+    void it(
+      flavor.keepsLayout
+        ? 'keeps the comments of the file when it writes it'
+        : 'does not keep comments or layout when it writes the file',
+      () =>
+        withDirectory(async (directory) => {
+          const path = join(directory, flavor.file);
+          writeFileSync(path, flavor.handWritten);
+          const adapter = flavor.create(path, nodeFileSystem());
+          expectOk(await adapter.set('name', 'light', { signal }));
+          const text = readFileSync(path, 'utf8');
+          assert.equal(
+            text.includes('Settings for the app'),
+            flavor.keepsLayout
+          );
+          assert.equal(text.includes('inline comment'), flavor.keepsLayout);
+        })
+    );
 
     void it('treats a hand edit as a new revision, and a reformat as no change', () =>
       withDirectory(async (directory) => {
@@ -630,3 +646,181 @@ for (const flavor of flavors) {
     });
   });
 }
+
+void describe('YAML file adapter: keeping comments and layout', () => {
+  const FILE = [
+    '# Settings for the app',
+    '',
+    'zeta: last # stays first',
+    'port: 8080 # the port',
+    '',
+    '# the flag',
+    'debug: true',
+    'list: [ 1, 2 ] # untouched',
+    'alpha: first',
+    '',
+  ].join('\n');
+
+  const open = (
+    directory: string,
+    extra: { keepComments?: boolean } = {}
+  ): { adapter: StorageAdapter; path: string } => {
+    const path = join(directory, 'settings.yaml');
+    writeFileSync(path, FILE);
+    return {
+      adapter: yamlFileAdapter({
+        path,
+        fileSystem: nodeFileSystem(),
+        yaml: YAML,
+        ...extra,
+      }),
+      path,
+    };
+  };
+
+  void it('changes only the entry it writes and keeps comments, order and spacing', () =>
+    withDirectory(async (directory) => {
+      const { adapter, path } = open(directory);
+      expectOk(await adapter.set('alpha', 'second', { signal }));
+      assert.equal(
+        readFileSync(path, 'utf8'),
+        FILE.replace('alpha: first', 'alpha: second')
+      );
+    }));
+
+  void it('keeps the inline comment of the entry it changes, and a number or boolean as one', () =>
+    withDirectory(async (directory) => {
+      const { adapter, path } = open(directory);
+      expectOk(await adapter.set('port', '9090', { signal }));
+      expectOk(await adapter.set('debug', 'false', { signal }));
+      expectOk(await adapter.set('zeta', 'changed', { signal }));
+      assert.equal(
+        readFileSync(path, 'utf8'),
+        FILE.replace('port: 8080', 'port: 9090')
+          .replace('debug: true', 'debug: false')
+          .replace('zeta: last', 'zeta: changed')
+      );
+      assert.equal(
+        expectOk(await adapter.get('port', { signal }))?.value,
+        '9090'
+      );
+    }));
+
+  void it('quotes a value that would otherwise read as another type', () =>
+    withDirectory(async (directory) => {
+      const { adapter, path } = open(directory);
+      expectOk(await adapter.set('alpha', 'true', { signal }));
+      expectOk(await adapter.set('zeta', '42', { signal }));
+      const text = readFileSync(path, 'utf8');
+      assert.match(text, /^alpha: "true"$/m);
+      assert.match(text, /^zeta: "42" # stays first$/m);
+      assert.equal(
+        expectOk(await adapter.get('alpha', { signal }))?.value,
+        'true'
+      );
+      assert.equal(
+        expectOk(await adapter.get('zeta', { signal }))?.value,
+        '42'
+      );
+    }));
+
+  void it('adds a new key at the end and leaves everything else as it was', () =>
+    withDirectory(async (directory) => {
+      const { adapter, path } = open(directory);
+      expectOk(await adapter.set('added', 'new', { signal }));
+      assert.equal(readFileSync(path, 'utf8'), `${FILE}added: new\n`);
+    }));
+
+  void it('removes a key and its own comment, and nothing else', () =>
+    withDirectory(async (directory) => {
+      const { adapter, path } = open(directory);
+      const removed = await adapter.remove?.('port', { signal });
+      assert.ok(removed?.ok, JSON.stringify(removed));
+      assert.equal(
+        readFileSync(path, 'utf8'),
+        FILE.replace('port: 8080 # the port\n', '')
+      );
+    }));
+
+  void it('writes a new file, a blank file and a comment-only file', () =>
+    withDirectory(async (directory) => {
+      const fresh = join(directory, 'fresh.yaml');
+      const blank = join(directory, 'blank.yaml');
+      const onlyComment = join(directory, 'comment.yaml');
+      writeFileSync(blank, '\n\n');
+      writeFileSync(onlyComment, '# nothing here yet\n');
+      for (const path of [fresh, blank, onlyComment]) {
+        const adapter = yamlFileAdapter({
+          path,
+          fileSystem: nodeFileSystem(),
+          yaml: YAML,
+        });
+        expectOk(await adapter.set('k', 'v', { signal }));
+        assert.deepEqual(YAML.parse(readFileSync(path, 'utf8')), { k: 'v' });
+      }
+      assert.match(readFileSync(onlyComment, 'utf8'), /# nothing here yet/);
+    }));
+
+  void it('writes the file fresh, without comments, if keeping the layout would change another entry', () =>
+    withDirectory(async (directory) => {
+      const path = join(directory, 'anchors.yaml');
+      writeFileSync(path, '# shared\nbase: &x one\ncopy: *x\n');
+      const adapter = yamlFileAdapter({
+        path,
+        fileSystem: nodeFileSystem(),
+        yaml: YAML,
+      });
+      expectOk(await adapter.set('base', 'two', { signal }));
+      // `copy` must still be `one`, even though it was an alias of `base`.
+      assert.deepEqual(YAML.parse(readFileSync(path, 'utf8')), {
+        base: 'two',
+        copy: 'one',
+      });
+      assert.equal(
+        expectOk(await adapter.get('copy', { signal }))?.value,
+        'one'
+      );
+    }));
+
+  void it('leaves entries it cannot use exactly as they are', () =>
+    withDirectory(async (directory) => {
+      const { adapter, path } = open(directory);
+      expectOk(await adapter.set('alpha', 'second', { signal }));
+      assert.match(
+        readFileSync(path, 'utf8'),
+        /^list: \[ 1, 2 \] # untouched$/m
+      );
+    }));
+
+  void it('writes the file fresh, sorted and without comments, with keepComments: false', () =>
+    withDirectory(async (directory) => {
+      const { adapter, path } = open(directory, { keepComments: false });
+      expectOk(await adapter.set('alpha', 'second', { signal }));
+      const text = readFileSync(path, 'utf8');
+      assert.ok(!text.includes('#'));
+      assert.deepEqual(Object.keys(YAML.parse(text) as object), [
+        'alpha',
+        'debug',
+        'list',
+        'port',
+        'zeta',
+      ]);
+    }));
+
+  void it('writes the file fresh when the YAML library cannot keep comments', () =>
+    withDirectory(async (directory) => {
+      const path = join(directory, 'plain.yaml');
+      writeFileSync(path, FILE);
+      const adapter = yamlFileAdapter({
+        path,
+        fileSystem: nodeFileSystem(),
+        yaml: { parse: YAML.parse, stringify: YAML.stringify },
+      });
+      expectOk(await adapter.set('alpha', 'second', { signal }));
+      assert.ok(!readFileSync(path, 'utf8').includes('#'));
+      assert.equal(
+        expectOk(await adapter.get('alpha', { signal }))?.value,
+        'second'
+      );
+    }));
+});

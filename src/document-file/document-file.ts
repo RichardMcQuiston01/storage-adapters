@@ -29,6 +29,15 @@ export interface DocumentCodec {
   /** Throws when the text is not valid in this format. */
   parse(text: string): unknown;
   stringify(document: Record<string, unknown>): string;
+  /**
+   * Optional. Writes the document into the text that is in the file now, so that what
+   * the format can keep besides the entries (comments, order, spacing) is kept.
+   * Returns `undefined` when it cannot, and `stringify` is used instead.
+   */
+  update?(
+    document: Record<string, unknown>,
+    previousText: string
+  ): string | undefined;
 }
 
 /** How one key's entry is written inside the document. */
@@ -65,7 +74,12 @@ export interface DocumentFileOptions {
 
 /** A file read: its entries, or why it is not a usable document. */
 type DocumentRead =
-  | { readonly kind: 'ok'; readonly entries: Map<string, unknown> }
+  | {
+      readonly kind: 'ok';
+      readonly entries: Map<string, unknown>;
+      /** The file's text as read, or `''` for a missing or blank file. */
+      readonly text: string;
+    }
   | { readonly kind: 'corrupt'; readonly detail: string };
 
 /** The folder part of a path, or `''` when there is none. */
@@ -133,12 +147,12 @@ export function documentFileAdapter(
       text = await fileSystem.readFile(path);
     } catch (error: unknown) {
       if (errorCodeOf(error) === 'ENOENT') {
-        return { kind: 'ok', entries: new Map() };
+        return { kind: 'ok', entries: new Map(), text: '' };
       }
       throw error;
     }
     if (text.trim() === '') {
-      return { kind: 'ok', entries: new Map() };
+      return { kind: 'ok', entries: new Map(), text: '' };
     }
     let parsed: unknown;
     try {
@@ -153,7 +167,7 @@ export function documentFileAdapter(
     ) {
       return { kind: 'corrupt', detail: 'is not an object of entries' };
     }
-    return { kind: 'ok', entries: new Map(Object.entries(parsed)) };
+    return { kind: 'ok', entries: new Map(Object.entries(parsed)), text };
   };
 
   const ensureDirectory = async (): Promise<void> => {
@@ -166,12 +180,17 @@ export function documentFileAdapter(
 
   /** Replaces the file with the entries in one step, keys in a steady order. */
   const writeDocument = async (
-    entries: Map<string, unknown>
+    entries: Map<string, unknown>,
+    previousText: string
   ): Promise<void> => {
     const sorted: [string, unknown][] = [...entries].sort(([left], [right]) =>
       left < right ? -1 : left > right ? 1 : 0
     );
-    const text: string = codec.stringify(Object.fromEntries(sorted));
+    const document: Record<string, unknown> = Object.fromEntries(sorted);
+    const text: string =
+      (previousText === ''
+        ? undefined
+        : codec.update?.(document, previousText)) ?? codec.stringify(document);
     // Only a temporary file this call created is ever removed.
     const temporaryPath: string = await writeTemporaryFile(
       fileSystem,
@@ -193,12 +212,12 @@ export function documentFileAdapter(
   /** What `get` reads from: the cache when it has one, otherwise the file. */
   const load = async (): Promise<DocumentRead> => {
     if (options.cache && snapshot !== null) {
-      return { kind: 'ok', entries: snapshot };
+      return { kind: 'ok', entries: snapshot, text: '' };
     }
     // Reads go through the queue so a slow one cannot overwrite a newer write.
     return withLock(lockName, async (): Promise<DocumentRead> => {
       if (options.cache && snapshot !== null) {
-        return { kind: 'ok', entries: snapshot };
+        return { kind: 'ok', entries: snapshot, text: '' };
       }
       const read: DocumentRead = await readDocument();
       if (read.kind === 'ok') {
@@ -373,7 +392,7 @@ export function documentFileAdapter(
               }
               const written = layout.write(value, existing);
               read.entries.set(key, written.raw);
-              await writeDocument(read.entries);
+              await writeDocument(read.entries, read.text);
               snapshot = new Map(read.entries);
               return { ok: true, value: written.stored };
             } catch (error: unknown) {
@@ -412,7 +431,7 @@ export function documentFileAdapter(
               }
               adopt(read.entries);
               if (read.entries.delete(key)) {
-                await writeDocument(read.entries);
+                await writeDocument(read.entries, read.text);
               }
               snapshot = new Map(read.entries);
               return { ok: true, value: null };

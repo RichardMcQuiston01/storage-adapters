@@ -60,9 +60,6 @@
   `LISTEN`/`NOTIFY`, so it would need polling or an external channel.
   (`postgresAdapter` does this through its `listener` option.)
 
-- Keep comments and layout when writing YAML, by editing the parsed document
-  instead of rewriting it (the `yaml` package can do this). INI has no such option
-  in the `ini` package.
 - Switch `dashboard-widgets-toolkit` to depend on this package; it keeps
   re-exporting the wrappers so its public API and tests are unchanged.
 - Optional React hook (`useStoredValue`).
