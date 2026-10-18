@@ -79,7 +79,7 @@ that cannot list answers `invalid` and says why: the file adapter needs a
 `FileSystemLike` with `listFiles` (`nodeFileSystem()` has it), SQLite needs a statement
 with `all()`, the browser adapters need a storage with `length` and `key()` (the real
 ones have both), IndexedDB needs `getAllKeys`, and S3 needs an object store with
-`listKeys` (`awsSdkObjectStore` has it when you also pass `ListObjectsV2Command`). The
+`listKeys` (`awsSdkObjectStore` has it when you also pass `ListObjectsV2Command`), and Firestore needs a store with `listKeys` (both wrappers have it). The
 browser adapters list only keys that hold one of their own envelopes, since the
 storage is shared with the page; Redis lists every key under its `prefix`, so give it
 one. Keys the adapter holds are the same as `get` would find: a corrupt document entry
@@ -266,6 +266,61 @@ so someone who can `PUBLISH` on the channel cannot forge a value, and someone wh
 the latest state. If the subscriber cannot start, writes still work, the failure goes
 to `onSubscriberError`, and the adapter tries again every `subscriberRetryMs`
 (default 5000, `0` for never) while anyone is subscribed.
+
+#### Firestore storage
+
+For apps on Firebase, use `firestoreAdapter` from the optional `/firebase` entry
+point. It imports no SDK: you connect with the Firebase Admin SDK
+(`@google-cloud/firestore`) or the web SDK (`firebase/firestore`) and wrap the
+connection.
+
+```ts
+import { Firestore } from '@google-cloud/firestore';
+import {
+  firestoreAdapter,
+  firestoreStoreFromAdmin,
+} from '@richardmcquiston01/storage-adapters/firebase';
+
+const adapter: StorageAdapter = firestoreAdapter({
+  store: firestoreStoreFromAdmin({
+    firestore: new Firestore(),
+    collection: 'storage_entry', // the default
+  }),
+});
+```
+
+With the web SDK (a browser, or Node), pass the module along with your `Firestore`:
+
+```ts
+import { getFirestore } from 'firebase/firestore';
+import * as firestoreSdk from 'firebase/firestore';
+import { firestoreStoreFromWebSdk } from '@richardmcquiston01/storage-adapters/firebase';
+
+const store = firestoreStoreFromWebSdk({
+  firestore: getFirestore(app),
+  sdk: firestoreSdk,
+});
+```
+
+Each key is one document in the collection, with the fields `key`, `value`, `revision`
+(a counter from 1), `created_at` and `updated_at` (ISO text). The document id is the
+key with every character except letters, digits and `-` written as `%XX`, because
+Firestore ids cannot hold `/`, `.`, `..` or `__name__`; the key itself is kept in the
+`key` field, which is what `list` queries. A write is a transaction that reads the
+document and then writes it, so two clients racing with the same `ifRevision` cannot
+both win: one gets `conflict`. A key with nothing stored is created. Rules or IAM that
+refuse the call are `forbidden`, a quota or rate limit is `quota`, a key or value
+Firestore cannot hold is `invalid` (an empty key, an id over 1,500 bytes, a value near
+1 MiB), a document that is not a stored entry is `corrupt`, anything else, a network
+failure included, is `unavailable`, and nothing throws.
+
+`subscribe` listens to the document with `onSnapshot`, so it reports changes other
+clients make as well as your own, once each. What is stored when the listener starts is
+not reported as a change. If a listener stops (for example, rules that refuse reads),
+`onWatchError(key, message)` says which key; that subscriber hears nothing more until it
+subscribes again. `list(prefix)` is a range query on `key`, so it needs no index.
+Security rules stay your job; the adapter only needs to read, write and delete
+documents in its collection, and to query it for `list`.
 
 #### REST storage
 
@@ -612,7 +667,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 

@@ -120,6 +120,16 @@
         "default": "./dist/rest.cjs"
       }
     },
+    "./firebase": {
+      "import": {
+        "types": "./dist/firebase.d.ts",
+        "default": "./dist/firebase.js"
+      },
+      "require": {
+        "types": "./dist/firebase.d.cts",
+        "default": "./dist/firebase.cjs"
+      }
+    },
     "./file": {
       "import": {
         "types": "./dist/file.d.ts",
@@ -198,6 +208,9 @@
       "rest": [
         "./dist/rest.d.ts"
       ],
+      "firebase": [
+        "./dist/firebase.d.ts"
+      ],
       "file": [
         "./dist/file.d.ts"
       ],
@@ -244,10 +257,12 @@
     "@changesets/cli": "^3.0.3",
     "@electric-sql/pglite": "^0.5.10",
     "@eslint/js": "^10.0.1",
+    "@google-cloud/firestore": "^9.3.1",
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
     "eslint": "^10.12.0",
     "fake-indexeddb": "^6.2.5",
+    "firebase": "^13.0.0",
     "globals": "^17.13.0",
     "ini": "^7.0.0",
     "ioredis": "^6.0.0",
