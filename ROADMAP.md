@@ -22,6 +22,11 @@
 - **0.9.0**: the `/redis` entry point with `redisAdapter()`; `fileAdapter`
   reports other processes' changes; fixes for fourteen bugs found in review;
   CI actions pinned to commit SHAs.
+- **0.10.0**: optional `list(prefix)` on every adapter and wrapper; the `/rest`
+  entry point with `restAdapter()`; cross-process locking for the file
+  adapters (`lock` option); Windows rename retries in `nodeFileSystem()`.
+- **0.11.0**: the `/firebase` entry point with `firestoreAdapter()` (Admin SDK
+  and web SDK wrappers, tested against the Firestore emulator in CI).
 
 ## Ground rules for every new adapter
 
