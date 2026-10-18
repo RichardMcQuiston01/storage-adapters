@@ -16,6 +16,7 @@ import * as core from '../dist/index.js';
 import * as fileNode from '../dist/file-node.js';
 import * as file from '../dist/file.js';
 import * as firebase from '../dist/firebase.js';
+import * as firebaseRealtime from '../dist/firebase-realtime.js';
 import * as iniFile from '../dist/ini-file.js';
 import * as jsonFile from '../dist/json-file.js';
 import * as mysql from '../dist/mysql.js';
@@ -45,6 +46,7 @@ const entries: Record<string, Record<string, unknown>> = {
   redis,
   rest,
   firebase,
+  firebaseRealtime,
   supabase,
   mysql,
   s3,

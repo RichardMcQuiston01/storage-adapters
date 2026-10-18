@@ -322,6 +322,63 @@ subscribes again. `list(prefix)` is a range query on `key`, so it needs no index
 Security rules stay your job; the adapter only needs to read, write and delete
 documents in its collection, and to query it for `list`.
 
+#### Realtime Database storage
+
+For apps on the Firebase Realtime Database, use `realtimeDatabaseAdapter` from the
+optional `/firebase/realtime` entry point. Like Firestore, it imports no SDK: connect
+with the Admin SDK (`firebase-admin`) or the web SDK (`firebase/database`) and wrap
+the connection.
+
+```ts
+import { getDatabase } from 'firebase-admin/database';
+import {
+  realtimeDatabaseAdapter,
+  realtimeStoreFromAdmin,
+} from '@richardmcquiston01/storage-adapters/firebase/realtime';
+
+const adapter: StorageAdapter = realtimeDatabaseAdapter({
+  store: realtimeStoreFromAdmin({
+    database: getDatabase(app),
+    path: 'storage_entry', // the default parent node
+  }),
+});
+```
+
+With the web SDK, pass the module along with your `Database`:
+
+```ts
+import { getDatabase } from 'firebase/database';
+import * as databaseSdk from 'firebase/database';
+import { realtimeStoreFromWebSdk } from '@richardmcquiston01/storage-adapters/firebase/realtime';
+
+const store = realtimeStoreFromWebSdk({
+  database: getDatabase(app),
+  sdk: databaseSdk,
+});
+```
+
+Each key is one child of the parent node, with the fields `entry_key`, `entry_value`,
+`revision` (a counter from 1), `created_at` and `updated_at` (ISO text). The child's
+name is `k` followed by the key with every character the database refuses in a name
+(`. $ # [ ] /`, control characters) and `%` written as `%XX`. The `k` keeps a name from
+looking like an integer, which the database treats specially. A write is a transaction
+that reads the child and then writes it (with `applyLocally` off, so nobody sees a
+value that may be run again), so two clients racing with the same `ifRevision` cannot
+both win: one gets `conflict`. Writes to one key through one adapter run in turn. A key
+with nothing stored is created; deleting a key forgets its counter, so the next write
+starts again at revision 1. Rules that refuse the call are `forbidden`, a value over
+the database's 10 MB string limit or a key it cannot hold (a lone surrogate, a name
+over 768 bytes) is `invalid`, a child that is not a stored entry is `corrupt`, anything
+else, a network failure included, is `unavailable`, and nothing throws.
+
+`subscribe` listens to the child with `onValue`, so it reports changes other clients
+make as well as your own, once each; what is stored when the listener starts is not
+reported. If a listener stops (rules that refuse reads, for example),
+`onWatchError(key, message)` says which key. `list(prefix)` reads the children in order
+from the prefix, 500 at a time, until one no longer starts with it. The database cannot
+send names alone, so `list` also transfers the values; keep large values out of a
+parent that you list often. Rules stay your job (the Admin SDK ignores them).
+
 #### Supabase storage
 
 For apps on Supabase, use `supabaseAdapter` from the optional `/supabase` entry point.

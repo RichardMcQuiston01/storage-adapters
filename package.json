@@ -130,6 +130,16 @@
         "default": "./dist/firebase.cjs"
       }
     },
+    "./firebase/realtime": {
+      "import": {
+        "types": "./dist/firebase-realtime.d.ts",
+        "default": "./dist/firebase-realtime.js"
+      },
+      "require": {
+        "types": "./dist/firebase-realtime.d.cts",
+        "default": "./dist/firebase-realtime.cjs"
+      }
+    },
     "./supabase": {
       "import": {
         "types": "./dist/supabase.d.ts",
@@ -221,6 +231,9 @@
       "firebase": [
         "./dist/firebase.d.ts"
       ],
+      "firebase/realtime": [
+        "./dist/firebase-realtime.d.ts"
+      ],
       "supabase": [
         "./dist/supabase.d.ts"
       ],
@@ -278,6 +291,7 @@
     "eslint": "^10.12.0",
     "fake-indexeddb": "^6.2.5",
     "firebase": "^13.0.0",
+    "firebase-admin": "^14.5.0",
     "globals": "^17.13.0",
     "ini": "^7.0.0",
     "ioredis": "^6.0.0",
