@@ -56,9 +56,9 @@
   `If-Match` (needs an account). Tested so far: Amazon S3's documented
   behaviour (`moto`), MinIO (in CI) and DigitalOcean Spaces (by hand).
 
-- Listen for writes made by other processes on the server SQL adapters:
-  `LISTEN`/`NOTIFY` for `postgresAdapter`. MySQL has no equivalent, so
-  `mysqlAdapter` would need polling or an external channel.
+- Listen for writes made by other processes on `mysqlAdapter`. MySQL has no
+  `LISTEN`/`NOTIFY`, so it would need polling or an external channel.
+  (`postgresAdapter` does this through its `listener` option.)
 
 - Keep comments and layout when writing YAML, by editing the parsed document
   instead of rewriting it (the `yaml` package can do this). INI has no such option

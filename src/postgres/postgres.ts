@@ -5,6 +5,7 @@
  * it in.
  */
 import { describeUnknownError } from '../errors.js';
+import { createKeyedQueue, type KeyedQueue } from '../keyed-queue.js';
 import {
   createChangeListeners,
   isSafeTableName,
@@ -15,6 +16,7 @@ import {
 import {
   compareKeys,
   prefixFailure,
+  utf8Length,
   type StorageAdapter,
   type StoredValue,
   type StoreErrorCode,
@@ -41,9 +43,45 @@ export interface PostgresClientLike {
   ): Promise<PostgresResultLike>;
 }
 
+/** A notification as `pg` delivers it: the channel and the text sent with it. */
+export interface PostgresNotificationLike {
+  readonly channel: string;
+  readonly payload?: string | undefined;
+}
+
+/**
+ * A dedicated, connected `pg` `Client` (not a pool: `LISTEN` belongs to one
+ * connection, and a pool may hand it back to someone else).
+ */
+export interface PostgresListenClientLike {
+  query(sql: string): Promise<unknown>;
+  on(
+    event: 'notification',
+    listener: (message: PostgresNotificationLike) => void
+  ): unknown;
+  on(event: 'error', listener: (error: Error) => void): unknown;
+  removeListener(
+    event: 'notification',
+    listener: (message: PostgresNotificationLike) => void
+  ): unknown;
+  removeListener(event: 'error', listener: (error: Error) => void): unknown;
+}
+
 export interface PostgresAdapterOptions {
   /** A connected client. The adapter never closes it. */
   readonly client: PostgresClientLike;
+  /**
+   * A second, dedicated connection that makes `subscribe` hear writes from other
+   * processes. When it is given, the first `subscribe` creates a trigger on the table
+   * that sends a `NOTIFY` after every insert, update or delete, then runs `LISTEN` on
+   * this connection. The role needs permission to create a function and a trigger.
+   * Without it, `subscribe` reports only changes made through this adapter. The adapter
+   * never closes it, and does not reconnect it: if it fails, `onListenError` is called
+   * and subscribers hear nothing more from other processes.
+   */
+  readonly listener?: PostgresListenClientLike;
+  /** Called when listening cannot start or stops. The message names the table. */
+  readonly onListenError?: (message: string) => void;
   /**
    * The table to use, created on first use if it is missing. Letters, digits and
    * underscores, with an optional `schema.` prefix. Defaults to `storage_entry`.
@@ -59,6 +97,10 @@ const NEVER_MATCHES = '-1';
 const MAX_WRITE_ATTEMPTS = 3;
 /** Creating the table can race another process doing the same; try again once. */
 const MAX_SETUP_ATTEMPTS = 2;
+/** A channel name is at most 63 bytes. */
+const MAX_CHANNEL_BYTES = 63;
+/** A notification carries at most 8,000 bytes; a longer key is announced without its name. */
+const MAX_NOTIFIED_KEY_BYTES = 7000;
 
 interface Statements {
   readonly select: string;
@@ -164,8 +206,9 @@ function firstRow(result: PostgresResultLike): Record<string, unknown> | null {
  * revision. The revision check and the write are one `INSERT ... ON CONFLICT ...
  * WHERE ... RETURNING` statement, so `set` with `ifRevision` reports `conflict`
  * when another connection wrote first, and a key with nothing stored is created.
- * `subscribe` reports changes made through this adapter; it does not listen for
- * writes made by other processes. Nothing throws: every failure is a `StoreResult`.
+ * `subscribe` reports changes made through this adapter, and, when a dedicated
+ * `listener` connection is given, changes other processes make (through a trigger and
+ * `LISTEN`/`NOTIFY`). Nothing throws: every failure is a `StoreResult`.
  */
 export function postgresAdapter(
   options: PostgresAdapterOptions
@@ -176,6 +219,15 @@ export function postgresAdapter(
   const sql = statementsFor(table);
   const listeners = createChangeListeners();
   let ready: Promise<void> | null = null;
+  const { listener } = options;
+  const channel = `${table.replace('.', '_')}_change`;
+  /** The revision last reported for each subscribed key (null: reported removed). */
+  const reported = new Map<string, string | null>();
+  const refreshes: KeyedQueue = createKeyedQueue();
+  /** Resolves true once `LISTEN` is running; null when not listening. */
+  let listening: Promise<boolean> | null = null;
+  let subscriptions = 0;
+  const tableBare: string = table.split('.').at(-1) ?? table;
 
   /** Creates the table once; a failure is not remembered, so the next call retries. */
   const prepare = (): Promise<void> => {
@@ -216,6 +268,188 @@ export function postgresAdapter(
       );
     }
     return null;
+  };
+
+  const listenFailure = (detail: string, error?: unknown): void => {
+    options.onListenError?.(
+      `${LABEL} table "${table}" ${detail}${error === undefined ? '' : ` (${describeUnknownError(error)})`}`
+    );
+  };
+
+  /** Tells subscribers once per change, whichever way the change reached us. */
+  const report = (key: string, stored: StoredValue | null): void => {
+    const revision: string | null = stored?.revision ?? null;
+    if (reported.has(key) && reported.get(key) === revision) {
+      return;
+    }
+    if (listeners.has(key)) {
+      reported.set(key, revision);
+    }
+    listeners.notify(key, stored);
+  };
+
+  const readStored = async (key: string): Promise<StoredValue | null> => {
+    const row = firstRow(await client.query(sql.statements.select, [key]));
+    const revision: string | undefined = revisionText(row?.revision);
+    return row !== null &&
+      typeof row.entry_value === 'string' &&
+      revision !== undefined
+      ? { value: row.entry_value, revision }
+      : null;
+  };
+
+  /** Reads a key again after a notification, one read at a time per key. */
+  const refresh = (key: string): Promise<void> =>
+    refreshes.run(key, async () => {
+      if (!listeners.has(key)) {
+        return;
+      }
+      try {
+        report(key, await readStored(key));
+      } catch (error: unknown) {
+        listenFailure(`could not read key "${key}" after a change`, error);
+      }
+    });
+
+  const onNotification = (message: PostgresNotificationLike): void => {
+    if (message.channel !== channel) {
+      return;
+    }
+    const payload: string = message.payload ?? '';
+    if (payload === '') {
+      // The key was too long to send (or unknown): look at every subscribed key.
+      for (const key of [...reported.keys()]) {
+        void refresh(key);
+      }
+    } else if (listeners.has(payload)) {
+      void refresh(payload);
+    }
+  };
+  const onListenerError = (error: Error): void => {
+    listenFailure('stopped listening for changes', error);
+  };
+
+  const installTrigger = async (): Promise<void> => {
+    const notify = `${table}_notify`;
+    const statements: string[] = [
+      `CREATE OR REPLACE FUNCTION ${notify}() RETURNS trigger LANGUAGE plpgsql AS $fn$
+DECLARE changed_key text;
+BEGIN
+  IF TG_OP = 'DELETE' THEN changed_key := OLD.entry_key; ELSE changed_key := NEW.entry_key; END IF;
+  IF octet_length(changed_key) > ${MAX_NOTIFIED_KEY_BYTES} THEN changed_key := ''; END IF;
+  PERFORM pg_notify('${channel}', changed_key);
+  RETURN NULL;
+END
+$fn$`,
+      `DROP TRIGGER IF EXISTS ${tableBare}_notify ON ${table}`,
+      `CREATE TRIGGER ${tableBare}_notify AFTER INSERT OR UPDATE OR DELETE ON ${table}
+FOR EACH ROW EXECUTE FUNCTION ${notify}()`,
+    ];
+    let lastError: unknown = null;
+    // Two processes doing this at once can collide; the second try finds it done.
+    for (let attempt = 0; attempt < MAX_SETUP_ATTEMPTS; attempt += 1) {
+      try {
+        for (const statement of statements) {
+          await client.query(statement, []);
+        }
+        return;
+      } catch (error: unknown) {
+        lastError = error;
+      }
+    }
+    throw lastError;
+  };
+
+  const startListening = (): Promise<boolean> => {
+    if (listener === undefined) {
+      return Promise.resolve(false);
+    }
+    if (listening === null) {
+      listening = (async (): Promise<boolean> => {
+        try {
+          if (!tableIsSafe) {
+            throw new Error(
+              'the table name must be letters, digits and underscores'
+            );
+          }
+          if (utf8Length(channel) > MAX_CHANNEL_BYTES) {
+            throw new Error(
+              `the channel name "${channel}" is over ${MAX_CHANNEL_BYTES} bytes: use a shorter table name`
+            );
+          }
+          await prepare();
+          await installTrigger();
+          listener.on('notification', onNotification);
+          listener.on('error', onListenerError);
+          await listener.query(`LISTEN ${channel}`);
+          return true;
+        } catch (error: unknown) {
+          listener.removeListener('notification', onNotification);
+          listener.removeListener('error', onListenerError);
+          listenFailure('could not start listening for changes', error);
+          return false;
+        }
+      })();
+    }
+    return listening;
+  };
+
+  const stopListening = async (): Promise<void> => {
+    const current: Promise<boolean> | null = listening;
+    if (current === null || listener === undefined) {
+      return;
+    }
+    listening = null;
+    if (!(await current)) {
+      return;
+    }
+    listener.removeListener('notification', onNotification);
+    listener.removeListener('error', onListenerError);
+    try {
+      await listener.query(`UNLISTEN ${channel}`);
+    } catch (error: unknown) {
+      listenFailure('could not stop listening', error);
+    }
+  };
+
+  /** Subscribes, and when a listener connection is given, starts hearing other processes. */
+  const subscribe = (
+    key: string,
+    onChange: (stored: StoredValue | null) => void
+  ): (() => void) => {
+    const stop: () => void = listeners.subscribe(key, onChange);
+    if (listener === undefined) {
+      return stop;
+    }
+    subscriptions += 1;
+    void startListening().then(async (started) => {
+      // What is stored when listening starts is not a change.
+      if (started && listeners.has(key) && !reported.has(key)) {
+        try {
+          const current: StoredValue | null = await readStored(key);
+          if (listeners.has(key) && !reported.has(key)) {
+            reported.set(key, current?.revision ?? null);
+          }
+        } catch (error: unknown) {
+          listenFailure(`could not read key "${key}"`, error);
+        }
+      }
+    });
+    let stopped = false;
+    return () => {
+      if (stopped) {
+        return;
+      }
+      stopped = true;
+      stop();
+      if (!listeners.has(key)) {
+        reported.delete(key);
+      }
+      subscriptions -= 1;
+      if (subscriptions === 0) {
+        void stopListening();
+      }
+    };
   };
 
   return {
@@ -266,7 +500,7 @@ export function postgresAdapter(
           );
           if (revision !== undefined) {
             const stored: StoredValue = { value, revision };
-            listeners.notify(key, stored);
+            report(key, stored);
             return { ok: true, value: stored };
           }
           // No row came back: the revision did not match. Say what it is now.
@@ -306,7 +540,7 @@ export function postgresAdapter(
       } catch (error: unknown) {
         return failedWith(error, key, 'removed');
       }
-      listeners.notify(key, null);
+      report(key, null);
       return { ok: true, value: null };
     },
 
@@ -349,6 +583,6 @@ export function postgresAdapter(
       }
     },
 
-    subscribe: listeners.subscribe,
+    subscribe,
   };
 }
