@@ -563,14 +563,17 @@ export function supabaseAdapter(
       if (settingsProblem !== null) {
         return prefixFailure(LABEL, 'invalid', prefix, settingsProblem);
       }
-      const keys: string[] = [];
-      // The server may cap a response below the page asked for, so keep asking
-      // from where the last answer ended until it has nothing more.
+      const keys = new Set<string>();
+      let received = 0;
+      // The server may cap a response below the page asked for, so keep asking from
+      // where the last answer ended until it has nothing more. A page that brings no
+      // key we have not already seen also ends it: a client or proxy that ignores the
+      // range would otherwise send the same rows for ever.
       for (;;) {
         const reply: Reply = await ask(
           rpcOf(`${table}_list`, { p_prefix: prefix }).range(
-            keys.length,
-            keys.length + LIST_PAGE_SIZE - 1
+            received,
+            received + LIST_PAGE_SIZE - 1
           )
         );
         if (!reply.ok) {
@@ -582,12 +585,14 @@ export function supabaseAdapter(
           );
         }
         const rows: Record<string, unknown>[] = asRows(reply.data);
+        const knownBefore: number = keys.size;
         for (const row of rows) {
           if (typeof row.entry_key === 'string') {
-            keys.push(row.entry_key);
+            keys.add(row.entry_key);
           }
         }
-        if (rows.length === 0) {
+        received += rows.length;
+        if (rows.length === 0 || keys.size === knownBefore) {
           break;
         }
       }

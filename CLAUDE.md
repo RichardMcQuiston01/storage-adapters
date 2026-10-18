@@ -29,6 +29,12 @@ adapter layer. Extracted from `dashboard-widgets-toolkit`
 - Functions return values the caller checks (`StoreResult`); reserve `throw`
   for programmer error. Error messages name the key and what went wrong.
 - Tests: `node:test` + `node:assert`, run by `bun test`. No network.
+  The real-browser tests (`test/browser-real.test.ts`) are skipped unless
+  `TEST_BROWSER` is `chromium`, `firefox` or `webkit`: run them with
+  `bun run test:browser` (Chromium by default, or `TEST_BROWSER=firefox bun run
+test:browser`), which builds `dist/` first because the pages load the built
+  package. `playwright-core` is pinned exactly so each browser matches CI; install
+  one with `bunx playwright-core install <engine>`.
 - `README.md` is in `.prettierignore` so the Author, Buy Me a Coffee, License
   and Copyright sections stay byte-for-byte.
 - Never write credentials or tokens into source, logs or committed files.

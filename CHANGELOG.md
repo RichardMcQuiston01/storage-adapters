@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 0.13.0
+
+### Minor Changes
+
+- 7d30b71: New `/firebase/realtime` entry point with `realtimeDatabaseAdapter()` for the Firebase Realtime Database, plus `realtimeStoreFromAdmin()` (Admin SDK) and `realtimeStoreFromWebSdk()` (web SDK) wrappers. One child node per key, transactional writes with `ifRevision` conflict detection, `list(prefix)` and `subscribe` that reports other clients' changes. Tested against the Realtime Database emulator through both SDKs in CI.
+
+### Patch Changes
+
+- c4339ab: `supabaseAdapter`'s `list` now stops as soon as a page brings no key it has not already seen, as well as on an empty page. Before, a client or proxy that ignored the `range` it was asked for sent the same rows for ever and `list` never returned (and grew without limit). PostgREST honours the range, so nothing changes against Supabase itself.
+
 ## 0.12.0
 
 ### Minor Changes

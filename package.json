@@ -1,6 +1,6 @@
 {
   "name": "@richardmcquiston01/storage-adapters",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value contract with typed errors and revisions, composable wrappers (prefix, fallback, retry, cache, encoding), and a generic persistence helper with conflict handling. No I/O in the core.",
   "keywords": [
     "typescript",
@@ -130,6 +130,16 @@
         "default": "./dist/firebase.cjs"
       }
     },
+    "./firebase/realtime": {
+      "import": {
+        "types": "./dist/firebase-realtime.d.ts",
+        "default": "./dist/firebase-realtime.js"
+      },
+      "require": {
+        "types": "./dist/firebase-realtime.d.cts",
+        "default": "./dist/firebase-realtime.cjs"
+      }
+    },
     "./supabase": {
       "import": {
         "types": "./dist/supabase.d.ts",
@@ -221,6 +231,9 @@
       "firebase": [
         "./dist/firebase.d.ts"
       ],
+      "firebase/realtime": [
+        "./dist/firebase-realtime.d.ts"
+      ],
       "supabase": [
         "./dist/supabase.d.ts"
       ],
@@ -255,6 +268,7 @@
     "build": "tsup",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
     "test": "bun test test",
+    "test:browser": "bun run build && TEST_BROWSER=${TEST_BROWSER:-chromium} bun test test/browser-real.test.ts",
     "test:deno": "deno test --allow-all --unstable-sloppy-imports --no-check test/",
     "smoke:dist": "bun scripts/smoke-dist.ts",
     "check:s3": "bun scripts/check-s3.ts",
@@ -277,11 +291,13 @@
     "eslint": "^10.12.0",
     "fake-indexeddb": "^6.2.5",
     "firebase": "^13.0.0",
+    "firebase-admin": "^14.5.0",
     "globals": "^17.13.0",
     "ini": "^7.0.0",
     "ioredis": "^6.0.0",
     "mysql2": "^3.24.6",
     "pg": "^8.23.1",
+    "playwright-core": "1.56.1",
     "prettier": "^3.9.9",
     "redis": "^6.3.0",
     "tsup": "^8.5.1",

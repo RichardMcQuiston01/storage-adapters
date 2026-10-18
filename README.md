@@ -322,6 +322,63 @@ subscribes again. `list(prefix)` is a range query on `key`, so it needs no index
 Security rules stay your job; the adapter only needs to read, write and delete
 documents in its collection, and to query it for `list`.
 
+#### Realtime Database storage
+
+For apps on the Firebase Realtime Database, use `realtimeDatabaseAdapter` from the
+optional `/firebase/realtime` entry point. Like Firestore, it imports no SDK: connect
+with the Admin SDK (`firebase-admin`) or the web SDK (`firebase/database`) and wrap
+the connection.
+
+```ts
+import { getDatabase } from 'firebase-admin/database';
+import {
+  realtimeDatabaseAdapter,
+  realtimeStoreFromAdmin,
+} from '@richardmcquiston01/storage-adapters/firebase/realtime';
+
+const adapter: StorageAdapter = realtimeDatabaseAdapter({
+  store: realtimeStoreFromAdmin({
+    database: getDatabase(app),
+    path: 'storage_entry', // the default parent node
+  }),
+});
+```
+
+With the web SDK, pass the module along with your `Database`:
+
+```ts
+import { getDatabase } from 'firebase/database';
+import * as databaseSdk from 'firebase/database';
+import { realtimeStoreFromWebSdk } from '@richardmcquiston01/storage-adapters/firebase/realtime';
+
+const store = realtimeStoreFromWebSdk({
+  database: getDatabase(app),
+  sdk: databaseSdk,
+});
+```
+
+Each key is one child of the parent node, with the fields `entry_key`, `entry_value`,
+`revision` (a counter from 1), `created_at` and `updated_at` (ISO text). The child's
+name is `k` followed by the key with every character the database refuses in a name
+(`. $ # [ ] /`, control characters) and `%` written as `%XX`. The `k` keeps a name from
+looking like an integer, which the database treats specially. A write is a transaction
+that reads the child and then writes it (with `applyLocally` off, so nobody sees a
+value that may be run again), so two clients racing with the same `ifRevision` cannot
+both win: one gets `conflict`. Writes to one key through one adapter run in turn. A key
+with nothing stored is created; deleting a key forgets its counter, so the next write
+starts again at revision 1. Rules that refuse the call are `forbidden`, a value over
+the database's 10 MB string limit or a key it cannot hold (a lone surrogate, a name
+over 768 bytes) is `invalid`, a child that is not a stored entry is `corrupt`, anything
+else, a network failure included, is `unavailable`, and nothing throws.
+
+`subscribe` listens to the child with `onValue`, so it reports changes other clients
+make as well as your own, once each; what is stored when the listener starts is not
+reported. If a listener stops (rules that refuse reads, for example),
+`onWatchError(key, message)` says which key. `list(prefix)` reads the children in order
+from the prefix, 500 at a time, until one no longer starts with it. The database cannot
+send names alone, so `list` also transfers the values; keep large values out of a
+parent that you list often. Rules stay your job (the Admin SDK ignores them).
+
 #### Supabase storage
 
 For apps on Supabase, use `supabaseAdapter` from the optional `/supabase` entry point.
@@ -730,7 +787,7 @@ envelope.
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/browser-real.test.ts` for the browser adapters in a real Chromium, Firefox or WebKit (run `bun run test:browser`, with `TEST_BROWSER=firefox` or `webkit` for the others), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 

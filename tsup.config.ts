@@ -14,6 +14,7 @@ export default defineConfig({
     redis: 'src/redis/index.ts',
     rest: 'src/rest/index.ts',
     firebase: 'src/firebase/index.ts',
+    'firebase-realtime': 'src/firebase/realtime.ts',
     supabase: 'src/supabase/index.ts',
     file: 'src/file/index.ts',
     'file-node': 'src/file/node.ts',

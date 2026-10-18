@@ -50,16 +50,7 @@
 - Each adapter is added to `test/conformance.test.ts`, which runs the shared
   contract suite (`test/support/conformance.ts`) against it.
 
-## Next
-
-1. **Chromium in CI.** Move the real-browser checks for localStorage,
-   sessionStorage and IndexedDB into the repository and run them in CI.
-
 ## Later
-
-- A Firebase Realtime Database adapter, if there is demand. The Firestore
-  adapter (`/firebase`) is built; the Realtime Database is a different API
-  (a JSON tree, `runTransaction` on a node, `onValue`).
 
 - Try `s3Adapter` against more services (MinIO, Cloudflare R2, DigitalOcean
   Spaces) and note which enforce `If-Match`. It was tested against Amazon S3's
