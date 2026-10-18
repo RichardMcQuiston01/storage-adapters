@@ -7,6 +7,7 @@
  * the Admin SDK) stay your job.
  */
 import { describeUnknownError } from '../errors.js';
+import { createKeyedQueue, type KeyedQueue } from '../keyed-queue.js';
 import { createChangeListeners, sqlFailure } from '../sql-shared.js';
 import {
   compareKeys,
@@ -235,34 +236,12 @@ export function firestoreAdapter(
   /** The revision last reported for each watched key (null: reported removed). */
   const reported = new Map<string, string | null>();
   const watchers = new Map<string, () => void>();
-  /** The last write queued for each document, so writes to one key run in turn. */
-  const writeTails = new Map<string, Promise<void>>();
-
   /**
-   * Runs `write` after the writes already queued for this document. Firestore
-   * transactions that read and then write one document wait on each other's locks
-   * and retry with a back-off, so many at once can take seconds; in turn, each takes
-   * one round trip. Writers in other processes still race, and the SDK retries those.
+   * Writes to one key run in turn: Firestore transactions that read and then write one
+   * document wait on each other's locks and retry with a back-off, so many at once can
+   * take seconds. Writers in other processes still race, and the SDK retries those.
    */
-  const queued = <T>(
-    documentId: string,
-    write: () => Promise<T>
-  ): Promise<T> => {
-    const previous: Promise<void> =
-      writeTails.get(documentId) ?? Promise.resolve();
-    const result: Promise<T> = previous.then(write);
-    const tail: Promise<void> = result.then(
-      () => undefined,
-      () => undefined
-    );
-    writeTails.set(documentId, tail);
-    void tail.then(() => {
-      if (writeTails.get(documentId) === tail) {
-        writeTails.delete(documentId);
-      }
-    });
-    return result;
-  };
+  const writes: KeyedQueue = createKeyedQueue();
 
   /** Why this call cannot go ahead, or null if it can. */
   const refusal = <T>(
@@ -371,7 +350,7 @@ export function firestoreAdapter(
         );
       }
       try {
-        const outcome: WriteOutcome = await queued(checked.id, () =>
+        const outcome: WriteOutcome = await writes.run(checked.id, () =>
           store.transact<WriteOutcome>(
             checked.id,
             (current): FirestoreDecision<WriteOutcome> => {
@@ -446,7 +425,7 @@ export function firestoreAdapter(
         return checked;
       }
       try {
-        await queued(checked.id, () =>
+        await writes.run(checked.id, () =>
           store.transact(checked.id, () => ({
             result: null,
             write: 'delete' as const,
