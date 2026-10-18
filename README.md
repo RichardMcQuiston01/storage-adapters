@@ -703,7 +703,7 @@ Choose by how much data you have and who writes it:
 | Adapter | Good for | Limit |
 | --- | --- | --- |
 | `jsonFileAdapter` | Settings a person may edit by hand | Rewrites the whole file on each write; one process unless `lock` is set |
-| `yamlFileAdapter`, `iniFileAdapter` | Settings a person edits by hand in YAML or INI | Rewrites the whole file and drops comments; one process unless `lock` is set |
+| `yamlFileAdapter`, `iniFileAdapter` | Settings a person edits by hand in YAML or INI | Rewrites the whole file on each write (YAML keeps comments, INI drops them); one process unless `lock` is set |
 | `fileAdapter` | Many or large values | One process per directory unless `lock` is set |
 | `sqliteAdapter` | Several processes writing | Needs a SQLite driver |
 | `postgresAdapter`, `mysqlAdapter` | Several servers sharing one database | Needs a driver and a running server |
@@ -768,9 +768,21 @@ that means the value `null` and keys such as `a=b`, `a[]`, `__proto__` and the e
 key; YAML holds everything, including multi-line text. Use a parser that does not run
 code (the `yaml` package's `parse` is safe).
 
-**The adapter rewrites the whole file when it writes, and does not keep comments or
-layout.** Comments are safe only while the program just reads the file; the first
-write removes them. Like the other file adapters, it is safe within one process unless you pass `lock` (a lock file beside the document, `<file>.lock`, with the same options and limits as the file adapter's), which lets several processes share it.
+**YAML keeps your comments; INI does not.** When the library you pass has
+`parseDocument` (the `yaml` package does), a write changes only the entry it is
+about: comments, key order and blank lines stay, a new key is added at the end, and a
+removed key takes its own comments with it. A number or boolean stays one when the new
+text still reads as one (`port: 8080` becomes `port: 9090`), and text that would read
+as another type is quoted (`"true"`). The `yaml` package still normalises small things
+when it prints the file, such as the spacing inside `[ 1, 2 ]`. The result is read back
+and must hold exactly the entries it should: if keeping the layout would change another
+entry (an anchor and the alias that shares its value, for example), the file is written
+fresh, without comments, so the stored values are always right. A file of only comments
+counts as empty. Pass `keepComments: false`, or a library without `parseDocument`, to
+always write the file fresh, sorted by key. The `ini` package has no way to keep
+comments, so **`iniFileAdapter` rewrites the whole file when it writes and drops
+comments and layout**: they are safe only while the program just reads the file.
+Like the other file adapters, both are safe within one process unless you pass `lock` (a lock file beside the document, `<file>.lock`, with the same options and limits as the file adapter's), which lets several processes share it.
 
 #### Typed persistence
 

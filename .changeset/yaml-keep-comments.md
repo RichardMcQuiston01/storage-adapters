@@ -1,0 +1,5 @@
+---
+'@richardmcquiston01/storage-adapters': minor
+---
+
+`yamlFileAdapter` now keeps the comments, key order and blank lines of the file when it writes. When the YAML library has `parseDocument` (the `yaml` package does), a write changes only the entry it is about: a new key is added at the end, a removed key takes its own comments with it, and a number or boolean stays one when the new text still reads as one. The result is read back and checked, and if keeping the layout would change another entry (an anchor and its alias, for example) the file is written fresh, without comments, as before. New option `keepComments` (default `true`; `false` writes the file fresh, sorted by key, as before) and exported type `YamlDocumentLike`; `parseDocument` is an optional member of `YamlLike`. A YAML file that holds only comments is now an empty document instead of `corrupt`. `iniFileAdapter` is unchanged and still drops comments. Existing files written by this adapter keep working; the visible difference is that YAML files are no longer re-sorted on every write.
