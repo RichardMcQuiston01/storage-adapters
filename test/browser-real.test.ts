@@ -1,16 +1,16 @@
 /**
- * The browser adapters in a real Chromium. The other browser tests run against fakes
+ * The browser adapters in a real browser. The other browser tests run against fakes
  * (`fake-indexeddb`, a Map standing in for Web Storage); this file runs the real
- * `dist/browser.js` and `dist/indexeddb.js` in a real browser, where storage events
- * cross tabs, quotas are real, a sandboxed frame really cannot reach storage, and
- * IndexedDB transactions really race. It is skipped unless you ask for it:
+ * `dist/browser.js` and `dist/indexeddb.js` in Chromium, Firefox or WebKit, where
+ * storage events cross tabs, quotas are real, a sandboxed frame really cannot reach
+ * storage, and IndexedDB transactions really race. It is skipped unless you ask for it:
  *
  *   bun run build
- *   TEST_CHROMIUM=1 bun test test/browser-chromium.test.ts
+ *   TEST_BROWSER=chromium bun test test/browser-real.test.ts   # or firefox, or webkit
  *
- * `playwright-core` is pinned to a version whose Chromium (141.0.7390.37) is the one
- * Playwright's `install chromium` fetches, so CI and a laptop run the same browser. Set
- * `TEST_CHROMIUM_PATH` to use a browser that is installed somewhere else.
+ * `playwright-core` is pinned exactly, so `bunx playwright-core install <engine>` fetches
+ * the same browser build in CI and on a laptop. Set `TEST_BROWSER_PATH` to use a browser
+ * that is installed somewhere else.
  */
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
@@ -23,17 +23,28 @@ import type {
 } from '../src/storage.js';
 import { runConformance } from './support/conformance.js';
 import {
+  isEngine,
   remoteAdapter,
   startHarness,
   type AdapterSpec,
+  type Engine,
   type Harness,
 } from './support/browser-harness.js';
 
 const signal: AbortSignal = new AbortController().signal;
-const enabled: boolean = process.env.TEST_CHROMIUM === '1';
-const harness: Harness | null = enabled
-  ? await startHarness(process.env.TEST_CHROMIUM_PATH)
-  : null;
+const requested: string | undefined = process.env.TEST_BROWSER;
+if (requested !== undefined && requested !== '' && !isEngine(requested)) {
+  throw new Error(
+    `TEST_BROWSER is "${requested}", but it must be chromium, firefox or webkit`
+  );
+}
+const engine: Engine | null = isEngine(requested) ? requested : null;
+const harness: Harness | null =
+  engine === null
+    ? null
+    : await startHarness(engine, process.env.TEST_BROWSER_PATH);
+/** What the tests call the browser, for their names. */
+const label: string = engine ?? 'a browser';
 if (harness !== null) {
   after(async () => {
     await harness.close();
@@ -78,10 +89,10 @@ const sharedPage =
     ? null
     : await harness.openPage(sharedContext);
 
-void describe('the browser adapters in a real Chromium', () => {
+void describe(`the browser adapters in ${label}`, () => {
   if (harness === null || sharedPage === null) {
     void it(
-      'is skipped: build the package and set TEST_CHROMIUM=1 to run it',
+      'is skipped: build the package and set TEST_BROWSER=chromium, firefox or webkit to run it',
       { skip: true },
       () => {
         /* nothing to run */
@@ -89,7 +100,7 @@ void describe('the browser adapters in a real Chromium', () => {
     );
     return;
   }
-  const chromium: Harness = harness;
+  const browser: Harness = harness;
   const page = sharedPage;
   const makeConformance = (
     name: string,
@@ -123,26 +134,26 @@ void describe('the browser adapters in a real Chromium', () => {
     });
   };
   makeConformance(
-    'localStorageAdapter in Chromium',
+    `localStorageAdapter in ${label}`,
     () => ({ kind: 'local' }),
     true
   );
   makeConformance(
-    'sessionStorageAdapter in Chromium',
+    `sessionStorageAdapter in ${label}`,
     () => ({ kind: 'session' }),
     true
   );
   makeConformance(
-    'indexedDbAdapter in Chromium',
+    `indexedDbAdapter in ${label}`,
     () => ({ kind: 'idb', database: freshDatabase() }),
     false
   );
 
   void describe('Web Storage', () => {
     void it('tells another tab about a change, through a real storage event', async () => {
-      const profile = await chromium.newContext();
-      const tabA = await chromium.openPage(profile);
-      const tabB = await chromium.openPage(profile);
+      const profile = await browser.newContext();
+      const tabA = await browser.openPage(profile);
+      const tabB = await browser.openPage(profile);
       const a = remoteAdapter(tabA, { kind: 'local' });
       const b = remoteAdapter(tabB, { kind: 'local' });
       const heardByA: (StoredValue | null)[] = [];
@@ -179,9 +190,9 @@ void describe('the browser adapters in a real Chromium', () => {
     });
 
     void it('shares sessionStorage with a frame of the same tab, not with another tab', async () => {
-      const profile = await chromium.newContext();
-      const top = await chromium.openPage(profile);
-      const otherTab = await chromium.openPage(profile);
+      const profile = await browser.newContext();
+      const top = await browser.openPage(profile);
+      const otherTab = await browser.openPage(profile);
       await top.evaluate(() =>
         (
           globalThis as unknown as { addFrame(src: string): Promise<void> }
@@ -215,9 +226,9 @@ void describe('the browser adapters in a real Chromium', () => {
     });
 
     void it('cannot reach storage from a sandboxed frame, and says so without throwing', async () => {
-      const profile = await chromium.newContext();
+      const profile = await browser.newContext();
       const sandboxed = await profile.newPage();
-      await sandboxed.goto(`${chromium.origin}/sandbox`);
+      await sandboxed.goto(`${browser.origin}/sandbox`);
       await sandboxed.waitForFunction(
         () =>
           (globalThis as unknown as { sandboxResult?: unknown })
@@ -244,8 +255,8 @@ void describe('the browser adapters in a real Chromium', () => {
     });
 
     void it('reports a full localStorage as quota and keeps working afterwards', async () => {
-      const profile = await chromium.newContext();
-      const tab = await chromium.openPage(profile);
+      const profile = await browser.newContext();
+      const tab = await browser.openPage(profile);
       const adapter = remoteAdapter(tab, { kind: 'local' });
       expectOk(await adapter.set('small', 'before', { signal }));
       const message = expectFailure(
@@ -263,8 +274,8 @@ void describe('the browser adapters in a real Chromium', () => {
     });
 
     void it('keeps what it wrote when the page reloads', async () => {
-      const profile = await chromium.newContext();
-      const tab = await chromium.openPage(profile);
+      const profile = await browser.newContext();
+      const tab = await browser.openPage(profile);
       const before = remoteAdapter(tab, { kind: 'local' });
       const written = expectOk(await before.set('theme', 'dark', { signal }));
       await tab.reload();
@@ -280,12 +291,12 @@ void describe('the browser adapters in a real Chromium', () => {
 
   void describe('IndexedDB', () => {
     void it('lets exactly one of several tabs holding the same revision win', async () => {
-      const profile = await chromium.newContext();
+      const profile = await browser.newContext();
       const database = freshDatabase();
       const tabs = await Promise.all([
-        chromium.openPage(profile),
-        chromium.openPage(profile),
-        chromium.openPage(profile),
+        browser.openPage(profile),
+        browser.openPage(profile),
+        browser.openPage(profile),
       ]);
       const adapters = tabs.map((tab) =>
         remoteAdapter(tab, { kind: 'idb', database })
@@ -312,12 +323,12 @@ void describe('the browser adapters in a real Chromium', () => {
     });
 
     void it('loses no update when several tabs add to one counter', async () => {
-      const profile = await chromium.newContext();
+      const profile = await browser.newContext();
       const database = freshDatabase();
       const tabs = await Promise.all([
-        chromium.openPage(profile),
-        chromium.openPage(profile),
-        chromium.openPage(profile),
+        browser.openPage(profile),
+        browser.openPage(profile),
+        browser.openPage(profile),
       ]);
       const adapters = tabs.map((tab) =>
         remoteAdapter(tab, { kind: 'idb', database })
@@ -354,10 +365,10 @@ void describe('the browser adapters in a real Chromium', () => {
     });
 
     void it('tells another tab about a change, through a real BroadcastChannel', async () => {
-      const profile = await chromium.newContext();
+      const profile = await browser.newContext();
       const database = freshDatabase();
-      const tabA = await chromium.openPage(profile);
-      const tabB = await chromium.openPage(profile);
+      const tabA = await browser.openPage(profile);
+      const tabB = await browser.openPage(profile);
       const a = remoteAdapter(tabA, { kind: 'idb', database });
       const b = remoteAdapter(tabB, { kind: 'idb', database });
       const heard: (StoredValue | null)[] = [];
@@ -375,10 +386,10 @@ void describe('the browser adapters in a real Chromium', () => {
     });
 
     void it('keeps working when another tab deletes the database under it', async () => {
-      const profile = await chromium.newContext();
+      const profile = await browser.newContext();
       const database = freshDatabase();
-      const tabA = await chromium.openPage(profile);
-      const tabB = await chromium.openPage(profile);
+      const tabA = await browser.openPage(profile);
+      const tabB = await browser.openPage(profile);
       const a = remoteAdapter(tabA, { kind: 'idb', database });
       expectOk(await a.set('k', 'v', { signal }));
       // The delete waits for tab A to close its connection; the adapter closes on
@@ -415,9 +426,9 @@ void describe('the browser adapters in a real Chromium', () => {
     });
 
     void it('keeps what it wrote when the page reloads', async () => {
-      const profile = await chromium.newContext();
+      const profile = await browser.newContext();
       const database = freshDatabase();
-      const tab = await chromium.openPage(profile);
+      const tab = await browser.openPage(profile);
       const before = remoteAdapter(tab, { kind: 'idb', database });
       const written = expectOk(await before.set('theme', 'dark', { signal }));
       await tab.reload();
@@ -434,8 +445,8 @@ void describe('the browser adapters in a real Chromium', () => {
       'stores a large value and many keys, and lists them',
       { timeout: 60_000 },
       async () => {
-        const profile = await chromium.newContext();
-        const tab = await chromium.openPage(profile);
+        const profile = await browser.newContext();
+        const tab = await browser.openPage(profile);
         const adapter = remoteAdapter(tab, {
           kind: 'idb',
           database: freshDatabase(),

@@ -1,5 +1,6 @@
 /**
- * Runs the real browser adapters in a real Chromium, for `browser-chromium.test.ts`.
+ * Runs the real browser adapters in a real browser (Chromium, Firefox or WebKit), for
+ * `browser-real.test.ts`.
  *
  * A small HTTP server serves the built package (`dist/`) on `127.0.0.1`, because
  * `localStorage` and IndexedDB need a real origin. Each page loads `dist/browser.js`
@@ -110,9 +111,19 @@ function serve(
   );
 }
 
-/** Starts the server and Chromium. `executablePath` is for a browser Playwright did not install. */
-export async function startHarness(executablePath?: string): Promise<Harness> {
-  const { chromium } = await import('playwright-core');
+/** The browser engines Playwright can launch, by the name of its launcher. */
+export type Engine = 'chromium' | 'firefox' | 'webkit';
+
+export function isEngine(name: string | undefined): name is Engine {
+  return name === 'chromium' || name === 'firefox' || name === 'webkit';
+}
+
+/** Starts the server and a browser. `executablePath` is for a browser Playwright did not install. */
+export async function startHarness(
+  engine: Engine,
+  executablePath?: string
+): Promise<Harness> {
+  const launcher = (await import('playwright-core'))[engine];
   let origin = '';
   const server: Server = createServer((request, response) => {
     serve(request, response, () => origin);
@@ -121,7 +132,7 @@ export async function startHarness(executablePath?: string): Promise<Harness> {
     server.listen(0, '127.0.0.1', resolve);
   });
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const browser: Browser = await chromium.launch(
+  const browser: Browser = await launcher.launch(
     executablePath === undefined ? {} : { executablePath }
   );
 
