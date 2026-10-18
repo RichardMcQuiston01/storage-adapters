@@ -39,6 +39,8 @@ export interface FakeSupabase extends SupabaseClientLike {
   >;
   /** The most rows the server returns for one request, like PostgREST's `max-rows`. */
   maxRows: number;
+  /** Answers every list request with all the keys, whatever range was asked for. */
+  ignoreRange: boolean;
   /** Channels that are open right now. */
   readonly openChannels: Set<FakeChannel>;
   /** Delivers a change to every open channel, as Realtime would. */
@@ -83,6 +85,7 @@ export function fakeSupabase(): FakeSupabase {
     calls,
     failNext: {},
     maxRows: 1000,
+    ignoreRange: false,
     openChannels,
     channelStatusNext: null,
     echoWrites: true,
@@ -157,6 +160,9 @@ export function fakeSupabase(): FakeSupabase {
           .filter((key) => key.startsWith(prefix))
           .sort(byBytes)
           .map((entry_key) => ({ entry_key }));
+        if (fake.ignoreRange) {
+          return { data: all };
+        }
         const from = range?.[0] ?? 0;
         const wanted = (range?.[1] ?? from + all.length) - from + 1;
         return { data: all.slice(from, from + Math.min(wanted, fake.maxRows)) };

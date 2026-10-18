@@ -344,6 +344,39 @@ void describe('supabaseAdapter', () => {
       );
     });
 
+    void it('stops, with every key once, when the server ignores the range it was asked for', async () => {
+      const client = fakeSupabase();
+      client.ignoreRange = true;
+      const adapter = supabaseAdapter({ client });
+      const keys = ['a', 'b', 'c', 'd', 'e'];
+      for (const key of keys) {
+        expectOk(await adapter.set(key, 'v', { signal }));
+      }
+      assert.deepEqual(
+        expectOk(await (adapter.list?.('', { signal }) ?? Promise.reject())),
+        keys
+      );
+      // The first answer has everything; the second brings nothing new, which ends it.
+      assert.equal(
+        client.calls.filter((call) => call === 'rpc storage_entry_list').length,
+        2
+      );
+    });
+
+    void it('stops after one request when the server ignores the range and has no keys', async () => {
+      const client = fakeSupabase();
+      client.ignoreRange = true;
+      const adapter = supabaseAdapter({ client });
+      assert.deepEqual(
+        expectOk(await (adapter.list?.('', { signal }) ?? Promise.reject())),
+        []
+      );
+      assert.equal(
+        client.calls.filter((call) => call === 'rpc storage_entry_list').length,
+        1
+      );
+    });
+
     void it('matches the prefix as plain text', async () => {
       const adapter = supabaseAdapter({ client: fakeSupabase() });
       for (const key of [
