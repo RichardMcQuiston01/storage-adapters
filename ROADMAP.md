@@ -62,4 +62,3 @@
 
 - Switch `dashboard-widgets-toolkit` to depend on this package; it keeps
   re-exporting the wrappers so its public API and tests are unchanged.
-- Optional React hook (`useStoredValue`).

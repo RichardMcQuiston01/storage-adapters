@@ -21,6 +21,7 @@ export default defineConfig({
     'json-file': 'src/json-file/index.ts',
     'yaml-file': 'src/yaml-file/index.ts',
     'ini-file': 'src/ini-file/index.ts',
+    react: 'src/react/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: {
@@ -35,5 +36,5 @@ export default defineConfig({
   platform: 'neutral',
   // Keep `node:` on built-in imports: Deno rejects the bare names.
   removeNodeProtocol: false,
-  external: [/^node:/],
+  external: [/^node:/, 'react'],
 });

@@ -784,6 +784,62 @@ comments, so **`iniFileAdapter` rewrites the whole file when it writes and drops
 comments and layout**: they are safe only while the program just reads the file.
 Like the other file adapters, both are safe within one process unless you pass `lock` (a lock file beside the document, `<file>.lock`, with the same options and limits as the file adapter's), which lets several processes share it.
 
+#### React hook
+
+`useStoredValue` from the optional `/react` entry point follows one key of any adapter
+in a component. React 18 or later is an optional peer dependency of this entry point
+only; nothing else in the package imports it.
+
+```tsx
+import { localStorageAdapter } from '@richardmcquiston01/storage-adapters/browser';
+import { useStoredValue } from '@richardmcquiston01/storage-adapters/react';
+
+// Create the adapter once, outside the component (or with useMemo).
+const adapter = localStorageAdapter();
+
+function ThemeToggle() {
+  const theme = useStoredValue(adapter, 'theme');
+  if (theme.status === 'loading') return null;
+  const next = theme.value === 'dark' ? 'light' : 'dark';
+  return (
+    <button
+      onClick={async () => {
+        const result = await theme.set(next, {
+          ...(theme.revision === undefined ? {} : { ifRevision: theme.revision }),
+        });
+        if (!result.ok) console.warn(result.error);
+      }}
+    >
+      {theme.value ?? 'light'}
+    </button>
+  );
+}
+```
+
+It returns `{ status, value, revision, error, set, remove, refresh }`:
+
+- `status` is `loading` until the first read finishes, `ready` once the value is known
+  (`value` is `null` when nothing is stored), and `error` when the read failed and the
+  value is not known.
+- When the adapter can `subscribe`, changes made elsewhere (another tab, another
+  process) update the component, and a change heard while the first read is still going
+  wins over that read. Unmounting stops the listener and cancels a read in progress.
+  Without `subscribe`, call `refresh()` when you want the latest value.
+- `set(value, { ifRevision })`, `remove()` and `refresh()` resolve with the adapter's
+  result, which you should check, as with the adapters themselves. A write is not
+  cancelled if the component unmounts. They update the component only while it still
+  shows the same adapter and key.
+- `error` is `{ code, message }` for the last failed read, write or remove (the message
+  names the key) and goes back to `null` on the next success. A failed `set` or `remove`
+  leaves `status` and `value` as they were; for `conflict`, read the result or call
+  `refresh()`.
+- An adapter that breaks its contract and rejects is reported as `unavailable`, not
+  thrown into your component. The value is text; encode and decode it yourself, or with
+  the package's encoding wrapper.
+
+Passing a new adapter object on every render reads the key again on every render, so
+create it once.
+
 #### Typed persistence
 
 `createPersistence<T>` stores one kind of value with a versioned envelope, a
