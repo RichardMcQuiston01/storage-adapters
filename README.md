@@ -190,7 +190,35 @@ RETURNING` statement, so two connections racing with the same `ifRevision` canno
 both win: one gets `conflict`. A key with nothing stored is created. A full disk is
 `quota`, a missing privilege is `forbidden`, a value PostgreSQL cannot store (such as
 a NUL character) is `invalid`, and nothing throws. `subscribe` reports changes made
-through the same adapter; it does not listen for writes made by other processes.
+through the same adapter. To hear writes from other processes too, give it a second,
+dedicated connection (`LISTEN` belongs to one connection, so not a pool):
+
+```ts
+import { Client, Pool } from 'pg';
+
+const listener = new Client({ connectionString: process.env.DATABASE_URL });
+await listener.connect();
+
+const adapter: StorageAdapter = postgresAdapter({
+  client: new Pool({ connectionString: process.env.DATABASE_URL }),
+  listener,
+  onListenError: (message) => console.error(message),
+});
+```
+
+The first `subscribe` then creates a function `<table>_notify` and a trigger on the
+table (the role needs permission to create them) that sends a `NOTIFY` on the channel
+`<table>_change` after every insert, update and delete, from any writer, plain SQL
+included, and runs `LISTEN` on the dedicated connection. A notification carries only
+the key; the adapter reads the key again and reports the change once, so your own
+writes are not reported twice, and what is stored when you subscribe is not a change.
+A key over 7,000 bytes cannot be sent in a notification, so the adapter then looks at
+every subscribed key. The channel name is at most 63 bytes, which limits the table
+name. When the last subscriber leaves, the adapter runs `UNLISTEN`. It never closes or
+reconnects the connection: if listening cannot start or stops, `onListenError` says
+so, and subscribers hear only changes made through this adapter. `NOTIFY` is
+delivered on commit and may be missed during a reconnect, so treat a notification as
+a prompt to re-read, not as a log. MySQL has no equivalent.
 
 #### MySQL storage
 
@@ -532,6 +560,7 @@ reports changes made through the same adapter; it does not listen for writes mad
 other processes.
 
 Observed so far: Amazon S3's documented behaviour (through the `moto` emulator) works.
+MinIO (built from source, February 2026) enforces `If-Match` and `If-None-Match` with 412, and answers 404 for `If-Match` on a missing object; the whole suite passes against it in CI.
 DigitalOcean Spaces (tested on `sfo3`, October 2026) refuses a quoted ETag in
 `If-Match` but accepts it without quotes, and answers 412 rather than 404 for a missing
 object; the adapter works out both by itself, so `ifRevision` works there. Run the check below to see how your own service behaves.
