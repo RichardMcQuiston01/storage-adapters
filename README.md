@@ -532,6 +532,7 @@ reports changes made through the same adapter; it does not listen for writes mad
 other processes.
 
 Observed so far: Amazon S3's documented behaviour (through the `moto` emulator) works.
+MinIO (built from source, February 2026) enforces `If-Match` and `If-None-Match` with 412, and answers 404 for `If-Match` on a missing object; the whole suite passes against it in CI.
 DigitalOcean Spaces (tested on `sfo3`, October 2026) refuses a quoted ETag in
 `If-Match` but accepts it without quotes, and answers 412 rather than 404 for a missing
 object; the adapter works out both by itself, so `ifRevision` works there. Run the check below to see how your own service behaves.

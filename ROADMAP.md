@@ -52,9 +52,9 @@
 
 ## Later
 
-- Try `s3Adapter` against more services (MinIO, Cloudflare R2, DigitalOcean
-  Spaces) and note which enforce `If-Match`. It was tested against Amazon S3's
-  documented behaviour through the `moto` emulator.
+- Try `s3Adapter` against Cloudflare R2 and note whether it enforces
+  `If-Match` (needs an account). Tested so far: Amazon S3's documented
+  behaviour (`moto`), MinIO (in CI) and DigitalOcean Spaces (by hand).
 
 - Listen for writes made by other processes on the server SQL adapters:
   `LISTEN`/`NOTIFY` for `postgresAdapter`. MySQL has no equivalent, so
