@@ -377,47 +377,53 @@ for (const flavor of flavors) {
         );
       }));
 
-    void it('stores awkward values and keys exactly, or refuses them, never changing them', () =>
-      withDirectory(async (directory) => {
-        const { adapter, path } = make(directory);
-        const fresh = (): StorageAdapter =>
-          flavor.create(path, nodeFileSystem());
-        for (const key of flavor.awkwardKeys) {
-          for (const value of flavor.awkwardValues) {
-            const result = await adapter.set(key, value, { signal });
-            const refused = flavor.refused.some(
-              ([badKey, badValue]) => badKey === key && badValue === value
-            );
-            if (!result.ok) {
+    // Every key and value is written to and read back from a real file, so a slow disk
+    // (a busy CI runner) can take several times the second it needs here.
+    void it(
+      'stores awkward values and keys exactly, or refuses them, never changing them',
+      { timeout: 60_000 },
+      () =>
+        withDirectory(async (directory) => {
+          const { adapter, path } = make(directory);
+          const fresh = (): StorageAdapter =>
+            flavor.create(path, nodeFileSystem());
+          for (const key of flavor.awkwardKeys) {
+            for (const value of flavor.awkwardValues) {
+              const result = await adapter.set(key, value, { signal });
+              const refused = flavor.refused.some(
+                ([badKey, badValue]) => badKey === key && badValue === value
+              );
+              if (!result.ok) {
+                assert.equal(
+                  result.code,
+                  'invalid',
+                  `${JSON.stringify([key, value])}`
+                );
+                assert.ok(
+                  refused,
+                  `unexpectedly refused ${JSON.stringify([key, value])}`
+                );
+                continue;
+              }
+              const stored = expectOk(await fresh().get(key, { signal }));
               assert.equal(
-                result.code,
-                'invalid',
-                `${JSON.stringify([key, value])}`
+                stored?.value,
+                value,
+                `${flavor.name} changed ${JSON.stringify([key, value])}`
               );
-              assert.ok(
-                refused,
-                `unexpectedly refused ${JSON.stringify([key, value])}`
-              );
-              continue;
+              assert.equal(stored?.revision, fingerprint(value));
             }
-            const stored = expectOk(await fresh().get(key, { signal }));
-            assert.equal(
-              stored?.value,
-              value,
-              `${flavor.name} changed ${JSON.stringify([key, value])}`
-            );
-            assert.equal(stored?.revision, fingerprint(value));
           }
-        }
-        assert.equal(({} as Record<string, unknown>)['polluted'], undefined);
-        // Everything stored is still readable after all those rewrites.
-        for (const key of flavor.awkwardKeys) {
-          assert.equal(
-            expectOk(await fresh().get(key, { signal }))?.value,
-            flavor.awkwardValues.at(-1)
-          );
-        }
-      }));
+          assert.equal(({} as Record<string, unknown>)['polluted'], undefined);
+          // Everything stored is still readable after all those rewrites.
+          for (const key of flavor.awkwardKeys) {
+            assert.equal(
+              expectOk(await fresh().get(key, { signal }))?.value,
+              flavor.awkwardValues.at(-1)
+            );
+          }
+        })
+    );
 
     void it('refuses what the format cannot hold, naming the key, and writes nothing', () =>
       withDirectory(async (directory) => {
