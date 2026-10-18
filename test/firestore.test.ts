@@ -183,6 +183,91 @@ void describe('firestoreAdapter', () => {
     );
   });
 
+  void describe('writes to one key', () => {
+    /** A store that records how many transactions run at once, per document. */
+    const countingStore = () => {
+      const store = fakeFirestore();
+      const running = new Map<string, number>();
+      let mostAtOnce = 0;
+      let mostForOneDocument = 0;
+      const transact = store.transact;
+      store.transact = async (documentId, decide) => {
+        const forDocument = (running.get(documentId) ?? 0) + 1;
+        running.set(documentId, forDocument);
+        mostForOneDocument = Math.max(mostForOneDocument, forDocument);
+        mostAtOnce = Math.max(
+          mostAtOnce,
+          [...running.values()].reduce((sum, count) => sum + count, 0)
+        );
+        try {
+          // A real round trip, so overlapping callers would overlap here.
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return await transact(documentId, decide);
+        } finally {
+          running.set(documentId, (running.get(documentId) ?? 1) - 1);
+        }
+      };
+      return {
+        store,
+        mostForOneDocument: () => mostForOneDocument,
+        mostAtOnce: () => mostAtOnce,
+      };
+    };
+
+    void it('run one at a time, so racing writers find out at once who won', async () => {
+      const counted = countingStore();
+      const adapter = firestoreAdapter({ store: counted.store });
+      const first = expectOk(await adapter.set('k', 'start', { signal }));
+      const results = await Promise.all(
+        Array.from({ length: 8 }, (_, index) =>
+          adapter.set('k', `writer-${index}`, {
+            signal,
+            ifRevision: first.revision ?? '',
+          })
+        )
+      );
+      assert.equal(results.filter((result) => result.ok).length, 1);
+      assert.equal(counted.mostForOneDocument(), 1);
+    });
+
+    void it('queue a removal behind the writes before it', async () => {
+      const counted = countingStore();
+      const adapter = firestoreAdapter({ store: counted.store });
+      const results = await Promise.all([
+        adapter.set('k', 'one', { signal }),
+        adapter.set('k', 'two', { signal }),
+        adapter.remove?.('k', { signal }) ??
+          Promise.reject(new Error('no remove')),
+      ]);
+      assert.ok(results.every((result) => result.ok));
+      assert.equal(counted.mostForOneDocument(), 1);
+      assert.deepEqual(expectOk(await adapter.get('k', { signal })), null);
+    });
+
+    void it('are not held up by an earlier write that failed', async () => {
+      const counted = countingStore();
+      const adapter = firestoreAdapter({ store: counted.store });
+      counted.store.failNext.transact = firestoreError('unavailable', 'blip');
+      const [failed, next] = await Promise.all([
+        adapter.set('k', 'lost', { signal }),
+        adapter.set('k', 'kept', { signal }),
+      ]);
+      expectFailure(failed, 'unavailable', 'k');
+      assert.deepEqual(expectOk(next), { value: 'kept', revision: '1' });
+    });
+
+    void it('to different keys still go at the same time', async () => {
+      const counted = countingStore();
+      const adapter = firestoreAdapter({ store: counted.store });
+      const results = await Promise.all(
+        ['a', 'b', 'c', 'd'].map((key) => adapter.set(key, 'v', { signal }))
+      );
+      assert.ok(results.every((result) => result.ok));
+      assert.equal(counted.mostForOneDocument(), 1);
+      assert.ok(counted.mostAtOnce() > 1, 'different keys should overlap');
+    });
+  });
+
   void it('writes the same document when Firestore reruns the transaction', async () => {
     const store = fakeFirestore();
     store.rerunTransactions = 2;
