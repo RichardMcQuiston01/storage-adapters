@@ -134,6 +134,16 @@
         "default": "./dist/rest.cjs"
       }
     },
+    "./couchdb": {
+      "import": {
+        "types": "./dist/couchdb.d.ts",
+        "default": "./dist/couchdb.js"
+      },
+      "require": {
+        "types": "./dist/couchdb.d.cts",
+        "default": "./dist/couchdb.cjs"
+      }
+    },
     "./firebase": {
       "import": {
         "types": "./dist/firebase.d.ts",
@@ -254,6 +264,9 @@
       ],
       "rest": [
         "./dist/rest.d.ts"
+      ],
+      "couchdb": [
+        "./dist/couchdb.d.ts"
       ],
       "firebase": [
         "./dist/firebase.d.ts"

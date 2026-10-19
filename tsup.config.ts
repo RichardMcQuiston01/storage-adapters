@@ -14,6 +14,7 @@ export default defineConfig({
     nats: 'src/nats/index.ts',
     redis: 'src/redis/index.ts',
     rest: 'src/rest/index.ts',
+    couchdb: 'src/couchdb/index.ts',
     firebase: 'src/firebase/index.ts',
     'firebase-realtime': 'src/firebase/realtime.ts',
     supabase: 'src/supabase/index.ts',

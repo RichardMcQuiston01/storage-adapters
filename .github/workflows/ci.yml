@@ -187,6 +187,41 @@ jobs:
           docker logs nats && exit 1
       - run: bun test test/nats-server.test.ts
 
+  # The CouchDB adapter, against a real CouchDB server. The default test run skips it
+  # (it uses an in-memory stand-in for CouchDB's HTTP API).
+  couchdb:
+    runs-on: ubuntu-latest
+    services:
+      couchdb:
+        image: couchdb:3.5.0
+        env:
+          COUCHDB_USER: admin
+          COUCHDB_PASSWORD: secret
+        ports:
+          - 5984:5984
+        options: >-
+          --health-cmd "curl -fsS http://127.0.0.1:5984/_up"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_COUCHDB_URL: http://127.0.0.1:5984
+      TEST_COUCHDB_USER: admin
+      TEST_COUCHDB_PASSWORD: secret
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      # A single node needs its system databases before it will create others.
+      - run: >-
+          curl -fsS -X POST -H "Content-Type: application/json"
+          -u "$TEST_COUCHDB_USER:$TEST_COUCHDB_PASSWORD"
+          "$TEST_COUCHDB_URL/_cluster_setup"
+          -d '{"action":"enable_single_node","bind_address":"0.0.0.0","username":"admin","password":"secret","singlenode":true}'
+      - run: bun test test/couchdb-server.test.ts
+
   # The S3 adapter, against an S3-compatible server. The default test run skips these
   # (it uses an in-memory store). moto implements S3's conditional writes, so it
   # checks the real request and response shapes through the AWS SDK.
