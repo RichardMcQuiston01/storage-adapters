@@ -85,6 +85,24 @@ storage is shared with the page; Redis lists every key under its `prefix`, so gi
 one. Keys the adapter holds are the same as `get` would find: a corrupt document entry
 is not listed.
 
+#### Writing `list` for your own adapter
+
+Two helpers do the sorting and filtering, so your `list` returns the same order as the
+built-in adapters: `compareKeys(left, right)` is the order (plain code-unit order), and
+`keysWithPrefix(keys, prefix)` returns the keys that start with `prefix`, sorted with it.
+
+```ts
+import {
+  keysWithPrefix,
+  type StorageAdapter,
+} from '@richardmcquiston01/storage-adapters';
+
+const list: StorageAdapter['list'] = async (prefix) => ({
+  ok: true,
+  value: keysWithPrefix(myStore.keys(), prefix),
+});
+```
+
 #### Browser storage
 
 The core does no I/O. `localStorageAdapter` lives in the optional `/browser`
@@ -245,7 +263,30 @@ either creates the key or fails with "duplicate entry", which is reported as
 `conflict`. Every step is a single statement, so it is safe on a pool. Keys are
 compared exactly (case and trailing spaces count) and can be up to 1024 bytes of
 UTF-8; a longer key is `invalid`. `subscribe` reports changes made through the same
-adapter; it does not listen for writes made by other processes.
+adapter. MySQL has nothing like PostgreSQL's `LISTEN`, so to hear writes from other
+processes you ask for polling:
+
+```ts
+const adapter: StorageAdapter = mysqlAdapter({
+  client: pool,
+  pollIntervalMs: 1000, // at least 50; off unless you give it
+  onPollError: (message) => console.error(message),
+});
+```
+
+While at least one key is subscribed, the adapter runs one query every
+`pollIntervalMs` for all the subscribed keys (100 at a time) and reports each key whose
+value or revision is different from what its subscribers were last told, once. With
+nothing subscribed it runs no query and keeps no timer, and the timer does not keep a
+program running. What is stored when you subscribe is not a change, and your own
+writes are reported at once and not again. A poll that began before one of your own
+writes is not believed for that key. A change is seen within one interval, and
+several changes between two polls arrive as one, the last; a key removed and made
+again between polls is still noticed, because the value is compared as well as the
+revision. A failing poll calls `onPollError` once for each run of failures, with a
+message that names the table, and polling carries on. The cost is a read of the
+subscribed rows each interval, so use a longer interval or fewer keys when the values
+are large.
 
 #### Redis storage
 
@@ -843,7 +884,8 @@ create it once.
 #### Typed persistence
 
 `createPersistence<T>` stores one kind of value with a versioned envelope, a
-size limit, revision tracking and a conflict policy. Rapid saves to a key
+size limit (`maxBytes`, 64 KiB by default; the default is exported as
+`DEFAULT_MAX_BYTES`), revision tracking and a conflict policy. Rapid saves to a key
 collapse into the newest, and every caller gets a result.
 
 ```ts
@@ -881,6 +923,24 @@ save again with `force: true`), `'overwrite'`, `'keep-theirs'`, or a merge
 function. `watch(key, onChange)` reports changes from elsewhere when the
 adapter has `subscribe`. Pass `field` and `version` to match an existing
 envelope.
+
+### Stability
+
+From 1.0.0 the package follows semantic versioning. The rules (what is public, how
+versions change, support and deprecation) are in
+[docs/versioning-policy.md](docs/versioning-policy.md), and the full list of what is
+Stable is in [docs/export-audit.md](docs/export-audit.md). Each entry point is
+either **Stable** or **Experimental**:
+
+- **Stable:** the core contract, the wrappers and `createPersistence`; `/browser`,
+  `/indexeddb`, `/sqlite`, `/file`, `/json-file`, `/yaml-file`, `/ini-file`,
+  `/postgres`, `/mysql`, `/redis`, `/s3` and `/rest`. A breaking change needs a new
+  major version.
+- **Experimental:** `/firebase`, `/firebase/realtime`, `/supabase`, `/react`,
+  Postgres's `listener` option and MySQL's `pollIntervalMs` option. They are tagged `@experimental` in the type
+  definitions and may change in a minor release, with a note in the changelog. They
+  become Stable once they have run against the real service (for `/react`, in a real
+  React app).
 
 ### Examples
 

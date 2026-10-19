@@ -1,8 +1,8 @@
-import {
-  firestorePrefixUpperBound,
-  type FirestoreDecision,
-  type FirestoreFields,
-  type FirestoreStoreLike,
+import { firestorePrefixUpperBound } from '../../src/firebase/firestore.js';
+import type {
+  FirestoreDecision,
+  FirestoreFields,
+  FirestoreStoreLike,
 } from '../../src/firebase/index.js';
 
 /** An error shaped like the ones the Firestore SDKs throw. */

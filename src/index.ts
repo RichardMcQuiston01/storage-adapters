@@ -3,7 +3,6 @@ export {
   keysWithPrefix,
   memoryAdapter,
   readOnly,
-  utf8Length,
   withEncoding,
   withFallback,
   withLogging,

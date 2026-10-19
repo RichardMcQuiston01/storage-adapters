@@ -48,6 +48,24 @@ export interface MysqlAdapterOptions {
    * underscores, with an optional `schema.` prefix. Defaults to `storage_entry`.
    */
   readonly table?: string;
+  /**
+   * How often, in milliseconds, to look for changes other processes made to the keys
+   * that are subscribed. MySQL has nothing like PostgreSQL's `LISTEN`, so this polls:
+   * one query for all the subscribed keys, while at least one is subscribed, and none
+   * otherwise. At least 50. Off by default, which reports only changes made through
+   * this adapter.
+   *
+   * @experimental New since 0.15.0 and tested against MariaDB. May change in a minor
+   * release. See docs/export-audit.md.
+   */
+  readonly pollIntervalMs?: number;
+  /**
+   * Called when a poll fails, once for each run of failures (it is called again after
+   * a poll has worked). Polling carries on, and the message names the table.
+   *
+   * @experimental New since 0.15.0. May change in a minor release. See docs/export-audit.md.
+   */
+  readonly onPollError?: (message: string) => void;
 }
 
 const LABEL = 'MySQL';
@@ -58,6 +76,10 @@ const NEVER_MATCHES = '0';
 const MAX_KEY_BYTES = 1024;
 /** Creating the table can race another process doing the same; try again once. */
 const MAX_SETUP_ATTEMPTS = 2;
+/** The shortest time between polls. */
+const MIN_POLL_INTERVAL_MS = 50;
+/** Keys read by one polling query, to keep the statement small. */
+const POLL_BATCH_SIZE = 100;
 
 interface Statements {
   readonly select: string;
@@ -67,6 +89,24 @@ interface Statements {
   readonly selectRevision: string;
   readonly remove: string;
   readonly list: string;
+}
+
+/** The statement a poll runs for `count` keys. */
+function selectManySql(table: string, count: number): string {
+  return `SELECT CONVERT(entry_key USING utf8mb4) AS entry_key, entry_value, CAST(revision AS CHAR) AS revision FROM ${table} WHERE entry_key IN (${Array.from({ length: count }, () => '?').join(', ')})`;
+}
+
+function sameStored(
+  left: StoredValue | null | undefined,
+  right: StoredValue | null
+): boolean {
+  return (
+    (left ?? null) === right ||
+    (left != null &&
+      right !== null &&
+      left.value === right.value &&
+      left.revision === right.revision)
+  );
 }
 
 /*
@@ -212,8 +252,9 @@ function insertIdOf(result: readonly [unknown, ...unknown[]]): string {
  * A `StorageAdapter` over a MySQL or MariaDB table. Each key is a row with a
  * counter revision. `set` with `ifRevision` reports `conflict` when another
  * connection wrote first, and creates a key that has nothing stored. Each step is
- * one atomic statement. `subscribe` reports changes made through this adapter; it
- * does not listen for writes made by other processes. Keys can be up to 1024 bytes
+ * one atomic statement. `subscribe` reports changes made through this adapter, and,
+ * when `pollIntervalMs` is given, changes other processes make (found by polling,
+ * since MySQL cannot announce them). Keys can be up to 1024 bytes
  * of UTF-8. Nothing throws: every failure is a `StoreResult`.
  */
 export function mysqlAdapter(options: MysqlAdapterOptions): StorageAdapter {
@@ -223,6 +264,22 @@ export function mysqlAdapter(options: MysqlAdapterOptions): StorageAdapter {
   const sql = statementsFor(table);
   const listeners = createChangeListeners();
   let ready: Promise<void> | null = null;
+
+  // Polling for other processes' writes (off unless `pollIntervalMs` is given).
+  const pollIntervalMs: number | null =
+    options.pollIntervalMs !== undefined &&
+    Number.isFinite(options.pollIntervalMs) &&
+    options.pollIntervalMs > 0
+      ? Math.max(MIN_POLL_INTERVAL_MS, Math.floor(options.pollIntervalMs))
+      : null;
+  /** How many subscriptions each key has; polling runs while this is not empty. */
+  const subscribedKeys = new Map<string, number>();
+  /** What each subscribed key last held, as far as subscribers have been told. */
+  const lastSeen = new Map<string, StoredValue | null>();
+  /** Counts writes made through this adapter, so a poll that began earlier is not believed. */
+  const localWrites = new Map<string, number>();
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let pollsFailing = false;
 
   /** Creates the table once; a failure is not remembered, so the next call retries. */
   const prepare = (): Promise<void> => {
@@ -292,6 +349,126 @@ export function mysqlAdapter(options: MysqlAdapterOptions): StorageAdapter {
     );
   };
 
+  /** Tells subscribers about a write made through this adapter. */
+  const announce = (key: string, stored: StoredValue | null): void => {
+    if (subscribedKeys.has(key)) {
+      lastSeen.set(key, stored);
+      localWrites.set(key, (localWrites.get(key) ?? 0) + 1);
+    }
+    listeners.notify(key, stored);
+  };
+
+  /**
+   * Reads the keys in one go and tells subscribers about any that differ from what they
+   * were last told. A key seen for the first time is only noted: what is stored when
+   * you subscribe is not a change. A key this adapter wrote while the query ran is
+   * skipped, because the answer may be older than that write.
+   */
+  const pollKeys = async (keys: readonly string[]): Promise<void> => {
+    await prepare();
+    const stamps = new Map<string, number>(
+      keys.map((key) => [key, localWrites.get(key) ?? 0])
+    );
+    const found = new Map<string, StoredValue>();
+    for (let start = 0; start < keys.length; start += POLL_BATCH_SIZE) {
+      const batch: string[] = keys.slice(start, start + POLL_BATCH_SIZE);
+      const [rows] = await client.query(
+        selectManySql(table, batch.length),
+        batch
+      );
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const entry = row as Record<string, unknown> | null;
+        const revision: string | undefined = revisionText(entry?.revision);
+        if (
+          typeof entry?.entry_key === 'string' &&
+          typeof entry.entry_value === 'string' &&
+          revision !== undefined
+        ) {
+          found.set(entry.entry_key, { value: entry.entry_value, revision });
+        }
+      }
+    }
+    for (const key of keys) {
+      if (
+        !subscribedKeys.has(key) ||
+        (localWrites.get(key) ?? 0) !== stamps.get(key)
+      ) {
+        continue;
+      }
+      const current: StoredValue | null = found.get(key) ?? null;
+      const known: boolean = lastSeen.has(key);
+      const before: StoredValue | null = lastSeen.get(key) ?? null;
+      lastSeen.set(key, current);
+      if (known && !sameStored(before, current)) {
+        listeners.notify(key, current);
+      }
+    }
+  };
+
+  const pollFailed = (error: unknown): void => {
+    if (!pollsFailing) {
+      pollsFailing = true;
+      options.onPollError?.(
+        `${LABEL} could not poll table "${table}" for changes (${describeUnknownError(error)})`
+      );
+    }
+  };
+
+  const scheduleNextPoll = (): void => {
+    if (
+      pollIntervalMs === null ||
+      pollTimer !== null ||
+      subscribedKeys.size === 0
+    ) {
+      return;
+    }
+    pollTimer = setTimeout(() => {
+      pollTimer = null;
+      const keys: string[] = [...subscribedKeys.keys()];
+      void (keys.length === 0 ? Promise.resolve() : pollKeys(keys))
+        .then(() => {
+          pollsFailing = false;
+        })
+        .catch(pollFailed)
+        .finally(scheduleNextPoll);
+    }, pollIntervalMs);
+    // Polling alone should not keep a program running.
+    (pollTimer as { unref?: () => void }).unref?.();
+  };
+
+  const subscribe = (
+    key: string,
+    onChange: (stored: StoredValue | null) => void
+  ): (() => void) => {
+    const stop: () => void = listeners.subscribe(key, onChange);
+    if (pollIntervalMs === null) {
+      return stop;
+    }
+    subscribedKeys.set(key, (subscribedKeys.get(key) ?? 0) + 1);
+    // Note what is stored now, then keep looking.
+    void pollKeys([key]).catch(pollFailed).finally(scheduleNextPoll);
+    let stopped = false;
+    return () => {
+      if (stopped) {
+        return;
+      }
+      stopped = true;
+      stop();
+      const remaining: number = (subscribedKeys.get(key) ?? 1) - 1;
+      if (remaining > 0) {
+        subscribedKeys.set(key, remaining);
+        return;
+      }
+      subscribedKeys.delete(key);
+      lastSeen.delete(key);
+      localWrites.delete(key);
+      if (subscribedKeys.size === 0 && pollTimer !== null) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+    };
+  };
+
   return {
     async get(key, { signal }) {
       const refused = refusal<StoredValue | null>(key, signal, false);
@@ -356,7 +533,7 @@ export function mysqlAdapter(options: MysqlAdapterOptions): StorageAdapter {
           }
         }
         const stored: StoredValue = { value, revision };
-        listeners.notify(key, stored);
+        announce(key, stored);
         return { ok: true, value: stored };
       } catch (error: unknown) {
         return failedWith(error, key, 'written');
@@ -374,7 +551,7 @@ export function mysqlAdapter(options: MysqlAdapterOptions): StorageAdapter {
       } catch (error: unknown) {
         return failedWith(error, key, 'removed');
       }
-      listeners.notify(key, null);
+      announce(key, null);
       return { ok: true, value: null };
     },
 
@@ -419,6 +596,6 @@ export function mysqlAdapter(options: MysqlAdapterOptions): StorageAdapter {
       }
     },
 
-    subscribe: listeners.subscribe,
+    subscribe,
   };
 }
