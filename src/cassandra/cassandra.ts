@@ -395,7 +395,7 @@ export function cassandraAdapter(
       `${LABEL} could not poll table "${table}" for changes (${cause})`,
   });
 
-  return {
+  const adapter = {
     async get(key, { signal }) {
       const refused = refusal<StoredValue | null>(key, signal);
       if (refused !== null) {
@@ -603,5 +603,13 @@ export function cassandraAdapter(
     subscribe(key, onChange) {
       return poller.subscribe(key, onChange);
     },
+  } satisfies StorageAdapter;
+
+  return {
+    ...adapter,
+    set: (key, value, options) =>
+      poller.trackWrite(key, () => adapter.set(key, value, options)),
+    remove: (key, options) =>
+      poller.trackWrite(key, () => adapter.remove(key, options)),
   };
 }

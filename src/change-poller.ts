@@ -31,6 +31,12 @@ export interface ChangePollerOptions {
 }
 
 export interface ChangePoller {
+  /**
+   * Runs a write or removal made through the adapter. While it runs, polls leave its key
+   * alone, so a poll that reads the new value before the adapter has announced it does
+   * not report it a second time.
+   */
+  trackWrite<T>(key: string, run: () => Promise<T>): Promise<T>;
   /** Tells subscribers about a write or removal made through the adapter itself. */
   announce(key: string, stored: StoredValue | null): void;
   /** Subscribes to a key; polls while anyone is subscribed (if polling is on). */
@@ -70,6 +76,26 @@ export function createChangePoller(options: ChangePollerOptions): ChangePoller {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let failing = false;
 
+  /** How many writes through the adapter are under way for each key. */
+  const writing = new Map<string, number>();
+
+  const trackWrite = async <T>(
+    key: string,
+    run: () => Promise<T>
+  ): Promise<T> => {
+    writing.set(key, (writing.get(key) ?? 0) + 1);
+    try {
+      return await run();
+    } finally {
+      const left: number = (writing.get(key) ?? 1) - 1;
+      if (left === 0) {
+        writing.delete(key);
+      } else {
+        writing.set(key, left);
+      }
+    }
+  };
+
   const announce = (key: string, stored: StoredValue | null): void => {
     if (subscribedKeys.has(key)) {
       lastSeen.set(key, stored);
@@ -95,6 +121,7 @@ export function createChangePoller(options: ChangePollerOptions): ChangePoller {
     for (const key of keys) {
       if (
         !subscribedKeys.has(key) ||
+        writing.has(key) ||
         (localWrites.get(key) ?? 0) !== stamps.get(key)
       ) {
         continue;
@@ -172,5 +199,5 @@ export function createChangePoller(options: ChangePollerOptions): ChangePoller {
     };
   };
 
-  return { announce, subscribe };
+  return { trackWrite, announce, subscribe };
 }

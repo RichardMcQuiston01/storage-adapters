@@ -609,7 +609,7 @@ export function arangoDbAdapter(
 
   /* ---------------------------------------------------------------- */
 
-  return {
+  const adapter = {
     async get(key, { signal }) {
       const checked = refusal<StoredValue | null>(key, signal);
       if (!('name' in checked)) {
@@ -788,5 +788,13 @@ export function arangoDbAdapter(
     subscribe(key, onChange) {
       return poller.subscribe(key, onChange);
     },
+  } satisfies StorageAdapter;
+
+  return {
+    ...adapter,
+    set: (key, value, options) =>
+      poller.trackWrite(key, () => adapter.set(key, value, options)),
+    remove: (key, options) =>
+      poller.trackWrite(key, () => adapter.remove(key, options)),
   };
 }
