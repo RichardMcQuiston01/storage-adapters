@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.19.0
+
+### Minor Changes
+
+- 1d996fc: Add the `/arangodb` entry point with `arangoDbAdapter()`, an adapter over ArangoDB's HTTP API. It takes a `fetch`, uses the document `_rev` as the revision so `ifRevision` becomes ArangoDB's own `If-Match` check, creates or replaces a document in one request, lists with an AQL query, and can find changes made by other processes with `pollIntervalMs`. Tested against a real ArangoDB server in CI.
+- fb2cd7d: Add the `/cassandra` entry point with `cassandraAdapter()`, an adapter over a `cassandra-driver` `Client`. It stores each entry as a row, uses lightweight transactions so `ifRevision` is checked atomically, reads at SERIAL consistency, lists by scanning the table, and can find changes made by other processes with `pollIntervalMs`. Tested against a real Cassandra node in CI. The change polling now shared with the ArangoDB adapter lives in one internal helper.
+
+### Patch Changes
+
+- a7582d3: Fix polling (`pollIntervalMs`) in the MySQL, ArangoDB and Cassandra adapters so a subscriber hears its own adapter's write once. A poll that read the new value before the write had been announced could report it a second time. Polls now leave a key alone while a write to it through the adapter is under way.
+
 ## 0.18.0
 
 ### Minor Changes
