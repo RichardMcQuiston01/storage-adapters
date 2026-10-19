@@ -7,6 +7,11 @@
 - 5f601da: `mysqlAdapter` can now report writes made by other processes. MySQL has no `LISTEN`/`NOTIFY`, so give it `pollIntervalMs` (at least 50) and, if you like, `onPollError`: while any key is subscribed, one query every interval reads all the subscribed keys (100 at a time) and each key whose value or revision changed is reported once. With nothing subscribed there is no query and no timer, and the timer does not keep a program running. What is stored when you subscribe is not a change; your own writes are reported at once and not again; a key removed and recreated with the same revision between polls is still noticed because the value is compared too; a failing poll is reported once per run of failures and polling carries on. Without `pollIntervalMs` nothing changes.
 - 5d6dc6b: Prepare the public surface for 1.0. **Breaking:** `utf8Length` (from the main entry point), `firestoreDocumentId` and `firestorePrefixUpperBound` (from `/firebase`), and `realtimeNodeKey` and `keyFromRealtimeNodeKey` (from `/firebase/realtime`) are no longer exported. They were implementation details of key encoding and size checks. The adapters behave as before. `/firebase`, `/firebase/realtime`, `/supabase`, `/react` and Postgres's `listener` option are tagged `@experimental` in the type definitions: they may change in a minor release until they have run against the real service. `compareKeys`, `keysWithPrefix` and `DEFAULT_MAX_BYTES` stay public and are now documented in the README, which also has a new Stability section.
 
+### Patch Changes
+
+- 906d84f: Tag the `pollIntervalMs` and `onPollError` options of `mysqlAdapter` `@experimental`, the same as Postgres's `listener` option: they are new and have only been tested against MariaDB, so they may change in a minor release. The README's Stability section now links to the versioning policy.
+- d024ec6: Add a `funding` link to `package.json`, so `npm fund` and the npm page show the same donate link as the README. No code changes.
+
 ## 0.15.0
 
 ### Minor Changes
