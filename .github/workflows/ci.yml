@@ -298,13 +298,30 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      # The node takes a minute or two to open its native-protocol port.
+      # The published port accepts connections before Cassandra is listening, so wait
+      # until the driver can really connect and run a query.
       - run: |
-          for attempt in $(seq 1 90); do
-            (echo > /dev/tcp/127.0.0.1/9042) 2>/dev/null && sleep 10 && exit 0
-            sleep 2
-          done
-          echo "Cassandra did not start" && exit 1
+          cat > wait-for-cassandra.ts <<'SCRIPT'
+          import { Client } from 'cassandra-driver';
+          for (let attempt = 1; attempt <= 90; attempt += 1) {
+            const client = new Client({
+              contactPoints: ['127.0.0.1'],
+              localDataCenter: 'datacenter1',
+            });
+            try {
+              await client.connect();
+              await client.execute('SELECT release_version FROM system.local');
+              await client.shutdown();
+              process.exit(0);
+            } catch {
+              await client.shutdown().catch(() => undefined);
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+            }
+          }
+          console.error('Cassandra did not start');
+          process.exit(1);
+          SCRIPT
+          bun ./wait-for-cassandra.ts
       - run: bun test test/cassandra-server.test.ts
 
   # The S3 adapter, against an S3-compatible server. The default test run skips these
