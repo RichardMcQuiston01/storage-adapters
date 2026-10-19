@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.17.0
+
+### Minor Changes
+
+- c385bd0: Add the `/nats` entry point with `natsKvAdapter()`, an adapter over a NATS JetStream key-value bucket. It uses the server's own sequence check for `ifRevision`, watches keys for `subscribe` so it hears writes from other processes, and escapes keys the bucket would refuse. Tested against a real NATS server in CI.
+- ecf1b40: Add the `/couchdb` entry point with `couchDbAdapter()`, an adapter over Apache CouchDB's HTTP API. It takes a `fetch`, uses the document `_rev` as the revision so `ifRevision` becomes CouchDB's own conflict check, lists with `_all_docs`, and follows the `_changes` feed with long polling for `subscribe`, so it hears writes from other processes. Tested against a real CouchDB server in CI.
+
 ## 0.16.0
 
 ### Minor Changes
