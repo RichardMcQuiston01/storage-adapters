@@ -1,6 +1,8 @@
 # Export audit (1.0 readiness)
 
-Every export of `@richardmcquiston01/storage-adapters`, with a proposed label for 1.0.
+Every export of `@richardmcquiston01/storage-adapters`, with a label for 1.0.
+
+> **Decided (2026-10-19).** The split below was approved, `restAdapter` counts as Stable, `compareKeys`, `keysWithPrefix` and `DEFAULT_MAX_BYTES` stay public and are documented in the README, and the five Internal helpers are no longer exported. Two things changed after this audit was written, in 0.15.0: the `./react` entry point (`useStoredValue`) was added and is **Experimental** (it is tested with `react-test-renderer` only, and has had no time in a real app), and `yamlFileAdapter` gained `keepComments` and the `YamlDocumentLike` type (Stable, with its adapter). The tables below are the original proposal.
 
 - **Stable:** covered by semver from 1.0. A breaking change needs a new major version.
 - **Experimental:** exported and documented as experimental. It may change in a minor release, and the changelog says so. It moves to Stable in a later minor once it meets the rule below.
@@ -12,7 +14,7 @@ This is a proposal. Nothing is removed or relabeled until it is approved.
 
 ## What the evidence shows
 
-- **Every release so far shipped between 2026-10-14 and 2026-10-18.** Versions 0.1.0 to 0.14.0 are five days old. No entry point has had time in other people's hands, so the rule above rests on tests, not on soak time.
+- **Every release so far shipped between 2026-10-14 and 2026-10-18.** Versions 0.1.0 to 0.14.0 are five days old (0.15.0 followed the next day). No entry point has had time in other people's hands, so the rule above rests on tests, not on soak time.
 - **The contract has barely changed.** Between 0.1.0 and now the only change to `StorageAdapter` is the optional `list` method. `StoreResult`, `StoredValue` and `StoreErrorCode` are as they were. Later releases added entry points and options, and fixed bugs found in review. No changelog entry is labelled as breaking.
 - **Evidence differs by adapter.** It falls into three tiers, set out in the table below.
 

@@ -1,7 +1,5 @@
 export {
   firestoreAdapter,
-  firestoreDocumentId,
-  firestorePrefixUpperBound,
   firestoreStoreFromAdmin,
   firestoreStoreFromWebSdk,
 } from './firestore.js';

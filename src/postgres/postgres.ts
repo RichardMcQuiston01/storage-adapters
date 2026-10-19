@@ -43,7 +43,11 @@ export interface PostgresClientLike {
   ): Promise<PostgresResultLike>;
 }
 
-/** A notification as `pg` delivers it: the channel and the text sent with it. */
+/**
+ * A notification as `pg` delivers it: the channel and the text sent with it.
+ *
+ * @experimental May change in a minor release (the `listener` option is new in 0.14.0). See docs/export-audit.md.
+ */
 export interface PostgresNotificationLike {
   readonly channel: string;
   readonly payload?: string | undefined;
@@ -52,6 +56,8 @@ export interface PostgresNotificationLike {
 /**
  * A dedicated, connected `pg` `Client` (not a pool: `LISTEN` belongs to one
  * connection, and a pool may hand it back to someone else).
+ *
+ * @experimental May change in a minor release (the `listener` option is new in 0.14.0). See docs/export-audit.md.
  */
 export interface PostgresListenClientLike {
   query(sql: string): Promise<unknown>;
@@ -78,9 +84,15 @@ export interface PostgresAdapterOptions {
    * Without it, `subscribe` reports only changes made through this adapter. The adapter
    * never closes it, and does not reconnect it: if it fails, `onListenError` is called
    * and subscribers hear nothing more from other processes.
+   *
+   * @experimental New in 0.14.0. May change in a minor release. See docs/export-audit.md.
    */
   readonly listener?: PostgresListenClientLike;
-  /** Called when listening cannot start or stops. The message names the table. */
+  /**
+   * Called when listening cannot start or stops. The message names the table.
+   *
+   * @experimental New in 0.14.0. May change in a minor release. See docs/export-audit.md.
+   */
   readonly onListenError?: (message: string) => void;
   /**
    * The table to use, created on first use if it is missing. Letters, digits and

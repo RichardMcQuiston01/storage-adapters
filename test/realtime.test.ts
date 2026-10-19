@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { realtimeDatabaseAdapter } from '../src/firebase/realtime.js';
 import {
   keyFromRealtimeNodeKey,
-  realtimeDatabaseAdapter,
   realtimeNodeKey,
-} from '../src/firebase/realtime.js';
+} from '../src/firebase/realtime-keys.js';
 import type {
   StorageAdapter,
   StoredValue,

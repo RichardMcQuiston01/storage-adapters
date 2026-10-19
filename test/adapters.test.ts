@@ -4,7 +4,6 @@ import { describe, it } from 'node:test';
 import {
   memoryAdapter,
   readOnly,
-  utf8Length,
   withEncoding,
   withFallback,
   withLogging,
@@ -15,6 +14,7 @@ import {
   type StorageLogEvent,
   type StoreResult,
 } from '../src/index.js';
+import { utf8Length } from '../src/storage.js';
 
 const signal: AbortSignal = new AbortController().signal;
 

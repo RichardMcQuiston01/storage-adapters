@@ -226,6 +226,8 @@ function failedWith<T>(
  * stored is created. `subscribe` reports your own writes and, because it
  * listens to the document, changes other clients make. Nothing throws: every
  * failure is a `StoreResult`.
+ *
+ * @experimental May change in a minor release until it has been run against the real service. See docs/export-audit.md.
  */
 export function firestoreAdapter(
   options: FirestoreAdapterOptions
@@ -543,7 +545,11 @@ function snapshotFields(snapshot: AdminSnapshotLike): FirestoreFields | null {
   return snapshot.exists ? (snapshot.data() ?? null) : null;
 }
 
-/** Wraps a Firestore instance from the Admin SDK (or `@google-cloud/firestore`). */
+/**
+ * Wraps a Firestore instance from the Admin SDK (or `@google-cloud/firestore`).
+ *
+ * @experimental May change in a minor release until it has been run against the real service. See docs/export-audit.md.
+ */
 export function firestoreStoreFromAdmin(
   options: AdminStoreOptions
 ): FirestoreStoreLike {
@@ -645,7 +651,11 @@ function webFields(snapshot: WebSnapshotLike): FirestoreFields | null {
   return snapshot.exists() ? (snapshot.data() ?? null) : null;
 }
 
-/** Wraps the web SDK (`firebase/firestore`), in a browser or in Node. */
+/**
+ * Wraps the web SDK (`firebase/firestore`), in a browser or in Node.
+ *
+ * @experimental May change in a minor release until it has been run against the real service. See docs/export-audit.md.
+ */
 export function firestoreStoreFromWebSdk(
   options: WebStoreOptions
 ): FirestoreStoreLike {
