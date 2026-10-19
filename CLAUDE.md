@@ -46,6 +46,8 @@ test:browser`), which builds `dist/` first because the pages load the built
 - Release: on `dev` run `bun run version-packages`, merge `dev` → `main`,
   tag `main` with `vX.Y.Z` matching `package.json`. The Release workflow
   (secret `NPM_TOKEN`) builds, tests and publishes with provenance.
+  A version with a prerelease part (`1.0.0-rc.1`) is published under the `next`
+  npm tag instead of `latest`.
 - CI runs on PRs and pushes to `dev`/`main`.
 - Workflows pin every action to a full commit SHA (with the version in a
   comment) and Bun and Deno to exact versions, so nothing CI or the release job
