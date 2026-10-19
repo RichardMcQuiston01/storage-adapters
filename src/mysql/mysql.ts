@@ -349,6 +349,26 @@ export function mysqlAdapter(options: MysqlAdapterOptions): StorageAdapter {
     );
   };
 
+  /** How many writes through this adapter are under way for each key. */
+  const writing = new Map<string, number>();
+
+  /** Runs a write; polls leave its key alone meanwhile, so it is heard once, not twice. */
+  const tracker = {
+    async trackWrite<T>(key: string, run: () => Promise<T>): Promise<T> {
+      writing.set(key, (writing.get(key) ?? 0) + 1);
+      try {
+        return await run();
+      } finally {
+        const left: number = (writing.get(key) ?? 1) - 1;
+        if (left === 0) {
+          writing.delete(key);
+        } else {
+          writing.set(key, left);
+        }
+      }
+    },
+  };
+
   /** Tells subscribers about a write made through this adapter. */
   const announce = (key: string, stored: StoredValue | null): void => {
     if (subscribedKeys.has(key)) {
@@ -391,6 +411,7 @@ export function mysqlAdapter(options: MysqlAdapterOptions): StorageAdapter {
     for (const key of keys) {
       if (
         !subscribedKeys.has(key) ||
+        writing.has(key) ||
         (localWrites.get(key) ?? 0) !== stamps.get(key)
       ) {
         continue;
@@ -469,7 +490,7 @@ export function mysqlAdapter(options: MysqlAdapterOptions): StorageAdapter {
     };
   };
 
-  return {
+  const adapter = {
     async get(key, { signal }) {
       const refused = refusal<StoredValue | null>(key, signal, false);
       if (refused !== null) {
@@ -597,5 +618,13 @@ export function mysqlAdapter(options: MysqlAdapterOptions): StorageAdapter {
     },
 
     subscribe,
+  } satisfies StorageAdapter;
+
+  return {
+    ...adapter,
+    set: (key, value, options) =>
+      tracker.trackWrite(key, () => adapter.set(key, value, options)),
+    remove: (key, options) =>
+      tracker.trackWrite(key, () => adapter.remove(key, options)),
   };
 }

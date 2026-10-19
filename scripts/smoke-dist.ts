@@ -15,6 +15,8 @@ import * as browser from '../dist/browser.js';
 import * as core from '../dist/index.js';
 import * as fileNode from '../dist/file-node.js';
 import * as file from '../dist/file.js';
+import * as arangodb from '../dist/arangodb.js';
+import * as cassandra from '../dist/cassandra.js';
 import * as couchdb from '../dist/couchdb.js';
 import * as firebase from '../dist/firebase.js';
 import * as firebaseRealtime from '../dist/firebase-realtime.js';
@@ -52,6 +54,8 @@ const entries: Record<string, Record<string, unknown>> = {
   nats,
   redis,
   rest,
+  arangodb,
+  cassandra,
   couchdb,
   firebase,
   firebaseRealtime,

@@ -1,6 +1,6 @@
 {
   "name": "@richardmcquiston01/storage-adapters",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value contract with typed errors and revisions, composable wrappers (prefix, fallback, retry, cache, encoding), and a generic persistence helper with conflict handling. No I/O in the core.",
   "keywords": [
     "typescript",
@@ -144,6 +144,26 @@
         "default": "./dist/rest.cjs"
       }
     },
+    "./arangodb": {
+      "import": {
+        "types": "./dist/arangodb.d.ts",
+        "default": "./dist/arangodb.js"
+      },
+      "require": {
+        "types": "./dist/arangodb.d.cts",
+        "default": "./dist/arangodb.cjs"
+      }
+    },
+    "./cassandra": {
+      "import": {
+        "types": "./dist/cassandra.d.ts",
+        "default": "./dist/cassandra.js"
+      },
+      "require": {
+        "types": "./dist/cassandra.d.cts",
+        "default": "./dist/cassandra.cjs"
+      }
+    },
     "./couchdb": {
       "import": {
         "types": "./dist/couchdb.d.ts",
@@ -278,6 +298,12 @@
       "rest": [
         "./dist/rest.d.ts"
       ],
+      "arangodb": [
+        "./dist/arangodb.d.ts"
+      ],
+      "cassandra": [
+        "./dist/cassandra.d.ts"
+      ],
       "couchdb": [
         "./dist/couchdb.d.ts"
       ],
@@ -356,6 +382,7 @@
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
+    "cassandra-driver": "^4.10.0",
     "eslint": "^10.12.0",
     "fake-indexeddb": "^6.2.5",
     "firebase": "^13.0.0",

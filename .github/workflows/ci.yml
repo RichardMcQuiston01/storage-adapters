@@ -248,6 +248,82 @@ jobs:
           echo "memcached did not start" && exit 1
       - run: bun test test/memcached-server.test.ts
 
+  # The ArangoDB adapter, against a real ArangoDB server. The default test run skips it
+  # (it uses an in-memory stand-in for ArangoDB's HTTP API).
+  arangodb:
+    runs-on: ubuntu-latest
+    services:
+      arangodb:
+        image: arangodb:3.12.9
+        env:
+          ARANGO_ROOT_PASSWORD: secret
+        ports:
+          - 8529:8529
+    env:
+      TEST_ARANGODB_URL: http://127.0.0.1:8529
+      TEST_ARANGODB_USER: root
+      TEST_ARANGODB_PASSWORD: secret
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      # The server takes a moment to open its HTTP port and accept the password.
+      - run: |
+          for attempt in $(seq 1 60); do
+            curl -fsS -u "$TEST_ARANGODB_USER:$TEST_ARANGODB_PASSWORD" "$TEST_ARANGODB_URL/_api/version" && exit 0
+            sleep 2
+          done
+          echo "ArangoDB did not start" && exit 1
+      - run: bun test test/arangodb-server.test.ts
+
+  # The Cassandra adapter, against a real Cassandra node. The default test run skips it
+  # (it uses an in-memory stand-in for the driver).
+  cassandra:
+    runs-on: ubuntu-latest
+    services:
+      cassandra:
+        image: cassandra:5.0.5
+        ports:
+          - 9042:9042
+        env:
+          MAX_HEAP_SIZE: 512M
+          HEAP_NEWSIZE: 128M
+    env:
+      TEST_CASSANDRA_CONTACT_POINT: 127.0.0.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      # The published port accepts connections before Cassandra is listening, so wait
+      # until the driver can really connect and run a query.
+      - run: |
+          cat > wait-for-cassandra.ts <<'SCRIPT'
+          import { Client } from 'cassandra-driver';
+          for (let attempt = 1; attempt <= 90; attempt += 1) {
+            const client = new Client({
+              contactPoints: ['127.0.0.1'],
+              localDataCenter: 'datacenter1',
+            });
+            try {
+              await client.connect();
+              await client.execute('SELECT release_version FROM system.local');
+              await client.shutdown();
+              process.exit(0);
+            } catch {
+              await client.shutdown().catch(() => undefined);
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+            }
+          }
+          console.error('Cassandra did not start');
+          process.exit(1);
+          SCRIPT
+          bun ./wait-for-cassandra.ts
+      - run: bun test test/cassandra-server.test.ts
+
   # The S3 adapter, against an S3-compatible server. The default test run skips these
   # (it uses an in-memory store). moto implements S3's conditional writes, so it
   # checks the real request and response shapes through the AWS SDK.

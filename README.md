@@ -454,6 +454,95 @@ and it cannot announce changes, so `subscribe` reports only writes made through 
 same adapter. Anything with `gets`, `add`, `cas` and `delete` can be passed in as
 the `client`; `memcachedFromMemcacheClient` is the wrapper for `memcache-client`.
 
+#### ArangoDB storage
+
+For ArangoDB, use `arangoDbAdapter` from the optional `/arangodb` entry point. It
+imports nothing: you pass in the `fetch` to use, as with the REST and CouchDB adapters.
+
+```ts
+import { arangoDbAdapter } from '@richardmcquiston01/storage-adapters/arangodb';
+
+const adapter: StorageAdapter = arangoDbAdapter({
+  url: 'http://127.0.0.1:8529',
+  database: 'app', // default: _system
+  collection: 'storage_entry', // default
+  fetch: (url, init) => fetch(url, init),
+  headers: { Authorization: `Basic ${btoa('root:secret')}` },
+});
+```
+
+Each entry is one document, `{ "_key": "<escaped key>", "value": "..." }`, in one
+collection, and its revision is the document's `_rev`. ArangoDB keys allow only some
+characters and at most 254 bytes, so every byte of a key other than letters, digits,
+`-` and `_` is escaped as `=XX` (`a.b` is stored as `a=2Eb`); the escaped key must be
+at most 254 characters. The collection is created before first use if it is not there;
+pass `createCollection: false` for an account that may not create collections.
+
+A write without `ifRevision` is one request that creates or replaces the document.
+`set` with `ifRevision` sends the revision in `If-Match`, so ArangoDB answers 412 when
+it is stale, which is reported as `conflict`; a key with nothing stored is created.
+`remove` deletes the document. `list(prefix)` runs an AQL query for the keys that start
+with the (escaped) prefix and follows the cursor through every batch; it skips documents
+the adapter would not have written.
+
+ArangoDB cannot announce changes to a plain HTTP client, so `subscribe` hears only
+writes made through the same adapter unless you ask for polling:
+
+```ts
+const adapter: StorageAdapter = arangoDbAdapter({
+  url,
+  fetch,
+  pollIntervalMs: 1000, // at least 50; off unless you give it
+  onPollError: (message) => console.error(message),
+});
+```
+
+While any key is subscribed, one AQL query every interval reads the subscribed keys
+(100 at a time) and each key whose value or revision changed is reported once. A key
+that changes twice between polls is reported once, with the latest state, and each
+interval costs one read of the subscribed documents. With nothing subscribed there is
+no query and no timer.
+
+#### Cassandra storage
+
+For Apache Cassandra, use `cassandraAdapter` from the optional `/cassandra` entry
+point. It imports no driver: you connect with `cassandra-driver` and pass in the
+`Client`.
+
+```ts
+import { Client } from 'cassandra-driver';
+import { cassandraAdapter } from '@richardmcquiston01/storage-adapters/cassandra';
+
+const client: Client = new Client({
+  contactPoints: ['127.0.0.1'],
+  localDataCenter: 'datacenter1',
+  keyspace: 'app',
+});
+const adapter: StorageAdapter = cassandraAdapter({
+  client,
+  table: 'storage_entry', // default; may be keyspace.table
+});
+```
+
+Each entry is one row in a table with `entry_key text PRIMARY KEY`, `entry_value`,
+`revision bigint`, `created_at` and `updated_at`. The table is created before first
+use (`createTable: false` for an account that may not create tables); the keyspace
+must already exist. The revision is a counter held in the row.
+
+Writes are lightweight transactions (`IF NOT EXISTS`, `IF revision = ?`,
+`DELETE ... IF EXISTS`), so `ifRevision` is checked atomically, and reads use SERIAL
+consistency (`readConsistency: 'localSerial'` for LOCAL_SERIAL) so they see the
+latest committed write. A write without `ifRevision` retries with the revision each
+refusal reports. Lightweight transactions cost several round trips per write, so this
+suits configuration and state rather than heavy write traffic. If a write times out
+the outcome is unknown, and the error message says so.
+
+`list(prefix)` scans the whole table (Cassandra cannot filter by key prefix) and pages
+through it, so keep the table small. Cassandra has no change feed, so `subscribe`
+hears only writes made through the same adapter unless you ask for polling
+(`pollIntervalMs`, at least 50, with `onPollError`), which reads the subscribed keys
+once per interval; with nothing subscribed there is no query and no timer.
+
 #### Firestore storage
 
 For apps on Firebase, use `firestoreAdapter` from the optional `/firebase` entry
@@ -870,6 +959,8 @@ Choose by how much data you have and who writes it:
 | `s3Adapter` | Values shared by many servers, no database to run | One or more requests per call; `ifRevision` needs a store that enforces conditional writes |
 | `natsKvAdapter` | Settings shared by services that already use NATS | `list` reads every key in the bucket; revisions are shared across the bucket |
 | `couchDbAdapter` | Several servers or devices sharing one CouchDB | One request per call; `subscribe` holds one long-polling request open |
+| `arangoDbAdapter` | Values in an ArangoDB you already run | One request per call; `subscribe` sees other processes only with `pollIntervalMs` |
+| `cassandraAdapter` | Values in a Cassandra cluster you already run | Lightweight transactions per write; `list` scans the table; `subscribe` sees other processes only with `pollIntervalMs` |
 | `memcachedAdapter` | Cache-style values on a Memcached you already run | Keys can be evicted at any time; no `list`; `subscribe` sees only this adapter's writes |
 
 #### YAML and INI file storage
@@ -1065,7 +1156,7 @@ either **Stable** or **Experimental**:
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/browser-real.test.ts` for the browser adapters in a real Chromium, Firefox or WebKit (run `bun run test:browser`, with `TEST_BROWSER=firefox` or `webkit` for the others), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/memcached.test.ts` and `test/memcached-server.test.ts` for the Memcached adapter (set `TEST_MEMCACHED_SERVER`, for example `127.0.0.1:11211`, to also run it against a real server), `test/couchdb.test.ts` and `test/couchdb-server.test.ts` for the CouchDB adapter (set `TEST_COUCHDB_URL`, and `TEST_COUCHDB_USER` and `TEST_COUCHDB_PASSWORD` if it needs a login, to also run it against a real server), `test/nats.test.ts` and `test/nats-server.test.ts` for the NATS KV adapter (set `TEST_NATS_URL`, for example `nats://127.0.0.1:4222` for a server started with `-js`, to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/browser-real.test.ts` for the browser adapters in a real Chromium, Firefox or WebKit (run `bun run test:browser`, with `TEST_BROWSER=firefox` or `webkit` for the others), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/cassandra.test.ts` and `test/cassandra-server.test.ts` for the Cassandra adapter (set `TEST_CASSANDRA_CONTACT_POINT`, and `TEST_CASSANDRA_DATACENTER` if it is not `datacenter1`, to also run it against a real node), `test/arangodb.test.ts` and `test/arangodb-server.test.ts` for the ArangoDB adapter (set `TEST_ARANGODB_URL`, and `TEST_ARANGODB_USER` and `TEST_ARANGODB_PASSWORD` if it needs a login, to also run it against a real server), `test/memcached.test.ts` and `test/memcached-server.test.ts` for the Memcached adapter (set `TEST_MEMCACHED_SERVER`, for example `127.0.0.1:11211`, to also run it against a real server), `test/couchdb.test.ts` and `test/couchdb-server.test.ts` for the CouchDB adapter (set `TEST_COUCHDB_URL`, and `TEST_COUCHDB_USER` and `TEST_COUCHDB_PASSWORD` if it needs a login, to also run it against a real server), `test/nats.test.ts` and `test/nats-server.test.ts` for the NATS KV adapter (set `TEST_NATS_URL`, for example `nats://127.0.0.1:4222` for a server started with `-js`, to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 
