@@ -926,16 +926,18 @@ envelope.
 
 ### Stability
 
-From 1.0.0 the package follows semantic versioning (see
-[docs/export-audit.md](docs/export-audit.md) for the full list). Each entry point is
+From 1.0.0 the package follows semantic versioning. The rules (what is public, how
+versions change, support and deprecation) are in
+[docs/versioning-policy.md](docs/versioning-policy.md), and the full list of what is
+Stable is in [docs/export-audit.md](docs/export-audit.md). Each entry point is
 either **Stable** or **Experimental**:
 
 - **Stable:** the core contract, the wrappers and `createPersistence`; `/browser`,
   `/indexeddb`, `/sqlite`, `/file`, `/json-file`, `/yaml-file`, `/ini-file`,
   `/postgres`, `/mysql`, `/redis`, `/s3` and `/rest`. A breaking change needs a new
   major version.
-- **Experimental:** `/firebase`, `/firebase/realtime`, `/supabase`, `/react`, and
-  Postgres's `listener` option. They are tagged `@experimental` in the type
+- **Experimental:** `/firebase`, `/firebase/realtime`, `/supabase`, `/react`,
+  Postgres's `listener` option and MySQL's `pollIntervalMs` option. They are tagged `@experimental` in the type
   definitions and may change in a minor release, with a note in the changelog. They
   become Stable once they have run against the real service (for `/react`, in a real
   React app).
