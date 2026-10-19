@@ -144,6 +144,16 @@
         "default": "./dist/rest.cjs"
       }
     },
+    "./arangodb": {
+      "import": {
+        "types": "./dist/arangodb.d.ts",
+        "default": "./dist/arangodb.js"
+      },
+      "require": {
+        "types": "./dist/arangodb.d.cts",
+        "default": "./dist/arangodb.cjs"
+      }
+    },
     "./couchdb": {
       "import": {
         "types": "./dist/couchdb.d.ts",
@@ -277,6 +287,9 @@
       ],
       "rest": [
         "./dist/rest.d.ts"
+      ],
+      "arangodb": [
+        "./dist/arangodb.d.ts"
       ],
       "couchdb": [
         "./dist/couchdb.d.ts"
