@@ -104,6 +104,16 @@
         "default": "./dist/s3.cjs"
       }
     },
+    "./nats": {
+      "import": {
+        "types": "./dist/nats.d.ts",
+        "default": "./dist/nats.js"
+      },
+      "require": {
+        "types": "./dist/nats.d.cts",
+        "default": "./dist/nats.cjs"
+      }
+    },
     "./redis": {
       "import": {
         "types": "./dist/redis.d.ts",
@@ -236,6 +246,9 @@
       "s3": [
         "./dist/s3.d.ts"
       ],
+      "nats": [
+        "./dist/nats.d.ts"
+      ],
       "redis": [
         "./dist/redis.d.ts"
       ],
@@ -310,6 +323,9 @@
     "@electric-sql/pglite": "^0.5.10",
     "@eslint/js": "^10.0.1",
     "@google-cloud/firestore": "^9.3.1",
+    "@nats-io/jetstream": "^3.4.0",
+    "@nats-io/kv": "^3.4.0",
+    "@nats-io/transport-node": "^3.4.0",
     "@supabase/supabase-js": "^2.118.0",
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
