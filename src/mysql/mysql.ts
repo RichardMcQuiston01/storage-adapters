@@ -54,11 +54,16 @@ export interface MysqlAdapterOptions {
    * one query for all the subscribed keys, while at least one is subscribed, and none
    * otherwise. At least 50. Off by default, which reports only changes made through
    * this adapter.
+   *
+   * @experimental New since 0.15.0 and tested against MariaDB. May change in a minor
+   * release. See docs/export-audit.md.
    */
   readonly pollIntervalMs?: number;
   /**
    * Called when a poll fails, once for each run of failures (it is called again after
    * a poll has worked). Polling carries on, and the message names the table.
+   *
+   * @experimental New since 0.15.0. May change in a minor release. See docs/export-audit.md.
    */
   readonly onPollError?: (message: string) => void;
 }
