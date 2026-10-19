@@ -1,6 +1,6 @@
 {
   "name": "@richardmcquiston01/storage-adapters",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value contract with typed errors and revisions, composable wrappers (prefix, fallback, retry, cache, encoding), and a generic persistence helper with conflict handling. No I/O in the core.",
   "keywords": [
     "typescript",
@@ -104,6 +104,16 @@
         "default": "./dist/s3.cjs"
       }
     },
+    "./nats": {
+      "import": {
+        "types": "./dist/nats.d.ts",
+        "default": "./dist/nats.js"
+      },
+      "require": {
+        "types": "./dist/nats.d.cts",
+        "default": "./dist/nats.cjs"
+      }
+    },
     "./redis": {
       "import": {
         "types": "./dist/redis.d.ts",
@@ -122,6 +132,16 @@
       "require": {
         "types": "./dist/rest.d.cts",
         "default": "./dist/rest.cjs"
+      }
+    },
+    "./couchdb": {
+      "import": {
+        "types": "./dist/couchdb.d.ts",
+        "default": "./dist/couchdb.js"
+      },
+      "require": {
+        "types": "./dist/couchdb.d.cts",
+        "default": "./dist/couchdb.cjs"
       }
     },
     "./firebase": {
@@ -236,11 +256,17 @@
       "s3": [
         "./dist/s3.d.ts"
       ],
+      "nats": [
+        "./dist/nats.d.ts"
+      ],
       "redis": [
         "./dist/redis.d.ts"
       ],
       "rest": [
         "./dist/rest.d.ts"
+      ],
+      "couchdb": [
+        "./dist/couchdb.d.ts"
       ],
       "firebase": [
         "./dist/firebase.d.ts"
@@ -310,6 +336,9 @@
     "@electric-sql/pglite": "^0.5.10",
     "@eslint/js": "^10.0.1",
     "@google-cloud/firestore": "^9.3.1",
+    "@nats-io/jetstream": "^3.4.0",
+    "@nats-io/kv": "^3.4.0",
+    "@nats-io/transport-node": "^3.4.0",
     "@supabase/supabase-js": "^2.118.0",
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
