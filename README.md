@@ -412,6 +412,48 @@ fails the message goes to `onChangesError` and the adapter asks again every
 `changesRetryMs` (default 5000, `0` for never), continuing from where it left off.
 Documents that changed before a key was subscribed are not reported.
 
+#### Memcached storage
+
+For cache-style storage on Memcached, use `memcachedAdapter` from the optional
+`/memcached` entry point. It imports no client: you connect with `memcache-client`,
+wrap it, and pass it in.
+
+```ts
+import { MemcacheClient } from 'memcache-client';
+import {
+  memcachedAdapter,
+  memcachedFromMemcacheClient,
+} from '@richardmcquiston01/storage-adapters/memcached';
+
+const adapter: StorageAdapter = memcachedAdapter({
+  client: memcachedFromMemcacheClient(
+    new MemcacheClient({ server: '127.0.0.1:11211' })
+  ),
+  ttlSeconds: 3600, // optional
+});
+```
+
+Memcached's own CAS token says only "unchanged since I read it", and a write does not
+hand back the new one. So each value is stored with a counter revision (`{"r": 3,
+"v": "..."}`), as in the Redis adapter, and a write reads the key, checks `ifRevision`
+against the counter, then stores with `add` (new key) or `cas` (existing key). Two
+processes cannot both win: the loser reads again and gets `conflict`. A key with
+nothing stored is created. A write without `ifRevision` replaces whatever is stored,
+trying again (up to 12 times, with a short random wait) if another writer gets in
+between; under sustained heavy contention on one key it can still report `conflict`.
+Keys are escaped (every byte other than letters, digits, `_`, `.` and `-` becomes
+`=XX`) and put behind a `prefix` (default `storage:`); the result must be at most 250
+characters, or the key is `invalid`. Values can be as large as the server's item size limit (1 MB by
+default); a larger one is `invalid`. `ttlSeconds` (at most 2592000) sets an expiry on
+every write.
+
+Memcached is a cache, so a key can disappear at any time: when it expires or is
+evicted, its counter starts again at 1, and a stale `ifRevision` then creates the key
+rather than conflicting. Memcached cannot list keys, so this adapter has no `list`,
+and it cannot announce changes, so `subscribe` reports only writes made through the
+same adapter. Anything with `gets`, `add`, `cas` and `delete` can be passed in as
+the `client`; `memcachedFromMemcacheClient` is the wrapper for `memcache-client`.
+
 #### Firestore storage
 
 For apps on Firebase, use `firestoreAdapter` from the optional `/firebase` entry
@@ -828,6 +870,7 @@ Choose by how much data you have and who writes it:
 | `s3Adapter` | Values shared by many servers, no database to run | One or more requests per call; `ifRevision` needs a store that enforces conditional writes |
 | `natsKvAdapter` | Settings shared by services that already use NATS | `list` reads every key in the bucket; revisions are shared across the bucket |
 | `couchDbAdapter` | Several servers or devices sharing one CouchDB | One request per call; `subscribe` holds one long-polling request open |
+| `memcachedAdapter` | Cache-style values on a Memcached you already run | Keys can be evicted at any time; no `list`; `subscribe` sees only this adapter's writes |
 
 #### YAML and INI file storage
 
@@ -1022,7 +1065,7 @@ either **Stable** or **Experimental**:
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/browser-real.test.ts` for the browser adapters in a real Chromium, Firefox or WebKit (run `bun run test:browser`, with `TEST_BROWSER=firefox` or `webkit` for the others), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/couchdb.test.ts` and `test/couchdb-server.test.ts` for the CouchDB adapter (set `TEST_COUCHDB_URL`, and `TEST_COUCHDB_USER` and `TEST_COUCHDB_PASSWORD` if it needs a login, to also run it against a real server), `test/nats.test.ts` and `test/nats-server.test.ts` for the NATS KV adapter (set `TEST_NATS_URL`, for example `nats://127.0.0.1:4222` for a server started with `-js`, to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/browser-real.test.ts` for the browser adapters in a real Chromium, Firefox or WebKit (run `bun run test:browser`, with `TEST_BROWSER=firefox` or `webkit` for the others), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/memcached.test.ts` and `test/memcached-server.test.ts` for the Memcached adapter (set `TEST_MEMCACHED_SERVER`, for example `127.0.0.1:11211`, to also run it against a real server), `test/couchdb.test.ts` and `test/couchdb-server.test.ts` for the CouchDB adapter (set `TEST_COUCHDB_URL`, and `TEST_COUCHDB_USER` and `TEST_COUCHDB_PASSWORD` if it needs a login, to also run it against a real server), `test/nats.test.ts` and `test/nats-server.test.ts` for the NATS KV adapter (set `TEST_NATS_URL`, for example `nats://127.0.0.1:4222` for a server started with `-js`, to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 

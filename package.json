@@ -104,6 +104,16 @@
         "default": "./dist/s3.cjs"
       }
     },
+    "./memcached": {
+      "import": {
+        "types": "./dist/memcached.d.ts",
+        "default": "./dist/memcached.js"
+      },
+      "require": {
+        "types": "./dist/memcached.d.cts",
+        "default": "./dist/memcached.cjs"
+      }
+    },
     "./nats": {
       "import": {
         "types": "./dist/nats.d.ts",
@@ -256,6 +266,9 @@
       "s3": [
         "./dist/s3.d.ts"
       ],
+      "memcached": [
+        "./dist/memcached.d.ts"
+      ],
       "nats": [
         "./dist/nats.d.ts"
       ],
@@ -350,6 +363,7 @@
     "globals": "^17.13.0",
     "ini": "^7.0.0",
     "ioredis": "^6.0.0",
+    "memcache-client": "^1.0.5",
     "mysql2": "^3.24.6",
     "pg": "^8.23.1",
     "playwright-core": "1.56.1",
