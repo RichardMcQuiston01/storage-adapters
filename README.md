@@ -245,7 +245,30 @@ either creates the key or fails with "duplicate entry", which is reported as
 `conflict`. Every step is a single statement, so it is safe on a pool. Keys are
 compared exactly (case and trailing spaces count) and can be up to 1024 bytes of
 UTF-8; a longer key is `invalid`. `subscribe` reports changes made through the same
-adapter; it does not listen for writes made by other processes.
+adapter. MySQL has nothing like PostgreSQL's `LISTEN`, so to hear writes from other
+processes you ask for polling:
+
+```ts
+const adapter: StorageAdapter = mysqlAdapter({
+  client: pool,
+  pollIntervalMs: 1000, // at least 50; off unless you give it
+  onPollError: (message) => console.error(message),
+});
+```
+
+While at least one key is subscribed, the adapter runs one query every
+`pollIntervalMs` for all the subscribed keys (100 at a time) and reports each key whose
+value or revision is different from what its subscribers were last told, once. With
+nothing subscribed it runs no query and keeps no timer, and the timer does not keep a
+program running. What is stored when you subscribe is not a change, and your own
+writes are reported at once and not again. A poll that began before one of your own
+writes is not believed for that key. A change is seen within one interval, and
+several changes between two polls arrive as one, the last; a key removed and made
+again between polls is still noticed, because the value is compared as well as the
+revision. A failing poll calls `onPollError` once for each run of failures, with a
+message that names the table, and polling carries on. The cost is a read of the
+subscribed rows each interval, so use a longer interval or fewer keys when the values
+are large.
 
 #### Redis storage
 

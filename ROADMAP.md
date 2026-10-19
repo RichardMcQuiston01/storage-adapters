@@ -56,9 +56,5 @@
   `If-Match` (needs an account). Tested so far: Amazon S3's documented
   behaviour (`moto`), MinIO (in CI) and DigitalOcean Spaces (by hand).
 
-- Listen for writes made by other processes on `mysqlAdapter`. MySQL has no
-  `LISTEN`/`NOTIFY`, so it would need polling or an external channel.
-  (`postgresAdapter` does this through its `listener` option.)
-
 - Switch `dashboard-widgets-toolkit` to depend on this package; it keeps
   re-exporting the wrappers so its public API and tests are unchanged.
