@@ -5,7 +5,8 @@
  */
 import { describeUnknownError } from '../errors.js';
 import type { FetchLike, FetchResponseLike } from '../rest/rest.js';
-import { createChangeListeners, sqlFailure } from '../sql-shared.js';
+import { createChangePoller } from '../change-poller.js';
+import { sqlFailure } from '../sql-shared.js';
 import { decodeUtf8, utf8Bytes } from '../utf8.js';
 import {
   compareKeys,
@@ -57,8 +58,6 @@ const DEFAULT_DATABASE = '_system';
 const DEFAULT_COLLECTION = 'storage_entry';
 const MAX_KEY_LENGTH = 254;
 const MAX_DETAIL_LENGTH = 200;
-const MIN_POLL_INTERVAL_MS = 50;
-const POLL_BATCH_SIZE = 100;
 const LIST_BATCH_SIZE = 1000;
 const NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,255}$/;
 const REVISION_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -194,12 +193,6 @@ type Reply =
       readonly detail: string;
     };
 
-function sameStored(a: StoredValue | null, b: StoredValue | null): boolean {
-  return a === null || b === null
-    ? a === b
-    : a.value === b.value && a.revision === b.revision;
-}
-
 /**
  * A `StorageAdapter` over ArangoDB. Each entry is a document `{ _key, value }` in one
  * collection and its revision is the document's `_rev`. A write without `ifRevision`
@@ -221,20 +214,7 @@ export function arangoDbAdapter(
   const createCollection: boolean = options.createCollection ?? true;
   const dbUrl = `${baseUrl}/_db/${encodeURIComponent(database)}/_api`;
   const documentsUrl = `${dbUrl}/document/${encodeURIComponent(collection)}`;
-  const listeners = createChangeListeners();
   let ready: Promise<Reply | null> | null = null;
-
-  const pollIntervalMs: number | null =
-    options.pollIntervalMs !== undefined &&
-    Number.isFinite(options.pollIntervalMs) &&
-    options.pollIntervalMs > 0
-      ? Math.max(MIN_POLL_INTERVAL_MS, Math.floor(options.pollIntervalMs))
-      : null;
-  const subscribedKeys = new Map<string, number>();
-  const lastSeen = new Map<string, StoredValue | null>();
-  const localWrites = new Map<string, number>();
-  let pollTimer: ReturnType<typeof setTimeout> | null = null;
-  let pollsFailing = false;
 
   const headersFor = async (
     extra: Record<string, string>
@@ -566,21 +546,10 @@ export function arangoDbAdapter(
   /* Change notices                                                    */
   /* ---------------------------------------------------------------- */
 
-  const announce = (key: string, stored: StoredValue | null): void => {
-    if (subscribedKeys.has(key)) {
-      lastSeen.set(key, stored);
-      localWrites.set(key, (localWrites.get(key) ?? 0) + 1);
-    }
-    listeners.notify(key, stored);
-  };
-
-  /**
-   * Reads the subscribed keys together and tells subscribers about any that differ from
-   * what they were last told. A key seen for the first time is only noted: what is
-   * stored when you subscribe is not a change. A key this adapter wrote while the query
-   * ran is skipped, because the answer may be older than that write.
-   */
-  const pollKeys = async (keys: readonly string[]): Promise<void> => {
+  /** Reads these keys together with one AQL query; throws if that fails. */
+  const readKeys = async (
+    keys: readonly string[]
+  ): Promise<ReadonlyMap<string, StoredValue>> => {
     const signal: AbortSignal = new AbortController().signal;
     const problem: Reply | null = await prepare(signal);
     if (problem !== null) {
@@ -590,100 +559,53 @@ export function arangoDbAdapter(
           : problem.detail
       );
     }
-    const stamps = new Map<string, number>(
-      keys.map((key) => [key, localWrites.get(key) ?? 0])
+    const names: string[] = keys.flatMap((key) => {
+      const name: string | undefined = encodeArangoKey(key);
+      return name === undefined ? [] : [name];
+    });
+    const result = await runQuery(
+      'FOR d IN @@collection FILTER d._key IN @names RETURN { name: d._key, revision: d._rev, value: d.value }',
+      { '@collection': collection, names },
+      names.length + 1,
+      signal
     );
-    const found = new Map<string, StoredValue>();
-    for (let start = 0; start < keys.length; start += POLL_BATCH_SIZE) {
-      const batch: string[] = keys.slice(start, start + POLL_BATCH_SIZE);
-      const names: string[] = batch.flatMap((key) => {
-        const name: string | undefined = encodeArangoKey(key);
-        return name === undefined ? [] : [name];
-      });
-      const result = await runQuery(
-        'FOR d IN @@collection FILTER d._key IN @names RETURN { name: d._key, revision: d._rev, value: d.value }',
-        { '@collection': collection, names },
-        names.length + 1,
-        signal
+    if (!result.ok) {
+      const reply: Reply = result.reply;
+      throw new Error(
+        reply.ok
+          ? `HTTP ${String(reply.status)}: ${detailOf(reply.text)}`
+          : reply.detail
       );
-      if (!result.ok) {
-        const reply: Reply = result.reply;
-        throw new Error(
-          reply.ok
-            ? `HTTP ${String(reply.status)}: ${detailOf(reply.text)}`
-            : reply.detail
-        );
-      }
-      for (const row of result.rows) {
-        const entry = row as {
-          name?: unknown;
-          revision?: unknown;
-          value?: unknown;
-        } | null;
-        const key: string | undefined =
-          typeof entry?.name === 'string'
-            ? decodeArangoKey(entry.name)
-            : undefined;
-        if (
-          key !== undefined &&
-          typeof entry?.revision === 'string' &&
-          typeof entry.value === 'string'
-        ) {
-          found.set(key, { value: entry.value, revision: entry.revision });
-        }
-      }
     }
-    for (const key of keys) {
+    const found = new Map<string, StoredValue>();
+    for (const row of result.rows) {
+      const entry = row as {
+        name?: unknown;
+        revision?: unknown;
+        value?: unknown;
+      } | null;
+      const key: string | undefined =
+        typeof entry?.name === 'string'
+          ? decodeArangoKey(entry.name)
+          : undefined;
       if (
-        !subscribedKeys.has(key) ||
-        (localWrites.get(key) ?? 0) !== stamps.get(key)
+        key !== undefined &&
+        typeof entry?.revision === 'string' &&
+        typeof entry.value === 'string'
       ) {
-        continue;
-      }
-      const current: StoredValue | null = found.get(key) ?? null;
-      const known: boolean = lastSeen.has(key);
-      const before: StoredValue | null = lastSeen.get(key) ?? null;
-      lastSeen.set(key, current);
-      if (known && !sameStored(before, current)) {
-        listeners.notify(key, current);
+        found.set(key, { value: entry.value, revision: entry.revision });
       }
     }
+    return found;
   };
 
-  const pollFailed = (error: unknown): void => {
-    if (!pollsFailing) {
-      pollsFailing = true;
-      try {
-        options.onPollError?.(
-          `${LABEL} could not poll collection "${collection}" for changes (${describeUnknownError(error)})`
-        );
-      } catch {
-        // A faulty error handler must not break the adapter.
-      }
-    }
-  };
-
-  const scheduleNextPoll = (): void => {
-    if (
-      pollIntervalMs === null ||
-      pollTimer !== null ||
-      subscribedKeys.size === 0
-    ) {
-      return;
-    }
-    pollTimer = setTimeout(() => {
-      pollTimer = null;
-      const keys: string[] = [...subscribedKeys.keys()];
-      void (keys.length === 0 ? Promise.resolve() : pollKeys(keys))
-        .then(() => {
-          pollsFailing = false;
-        })
-        .catch(pollFailed)
-        .finally(scheduleNextPoll);
-    }, pollIntervalMs);
-    // Polling alone should not keep a program running.
-    (pollTimer as { unref?: () => void }).unref?.();
-  };
+  const poller = createChangePoller({
+    intervalMs: options.pollIntervalMs,
+    readKeys,
+    onError: options.onPollError,
+    describeFailure: (cause) =>
+      `${LABEL} could not poll collection "${collection}" for changes (${cause})`,
+  });
 
   /* ---------------------------------------------------------------- */
 
@@ -712,7 +634,7 @@ export function arangoDbAdapter(
       }
       const finish = (revision: string): StoreResult<StoredValue> => {
         const stored: StoredValue = { value, revision };
-        announce(key, stored);
+        poller.announce(key, stored);
         return { ok: true, value: stored };
       };
       const conflict = (holds: StoredValue | null): StoreResult<StoredValue> =>
@@ -793,7 +715,7 @@ export function arangoDbAdapter(
       ) {
         return unexpected(key, 'removed', sent.status, sent.text);
       }
-      announce(key, null);
+      poller.announce(key, null);
       return { ok: true, value: null };
     },
 
@@ -864,33 +786,7 @@ export function arangoDbAdapter(
     },
 
     subscribe(key, onChange) {
-      const stop: () => void = listeners.subscribe(key, onChange);
-      if (pollIntervalMs === null) {
-        return stop;
-      }
-      subscribedKeys.set(key, (subscribedKeys.get(key) ?? 0) + 1);
-      // Note what is stored now, then keep looking.
-      void pollKeys([key]).catch(pollFailed).finally(scheduleNextPoll);
-      let stopped = false;
-      return () => {
-        if (stopped) {
-          return;
-        }
-        stopped = true;
-        stop();
-        const remaining: number = (subscribedKeys.get(key) ?? 1) - 1;
-        if (remaining > 0) {
-          subscribedKeys.set(key, remaining);
-          return;
-        }
-        subscribedKeys.delete(key);
-        lastSeen.delete(key);
-        localWrites.delete(key);
-        if (subscribedKeys.size === 0 && pollTimer !== null) {
-          clearTimeout(pollTimer);
-          pollTimer = null;
-        }
-      };
+      return poller.subscribe(key, onChange);
     },
   };
 }
