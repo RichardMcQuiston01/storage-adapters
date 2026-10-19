@@ -85,6 +85,24 @@ storage is shared with the page; Redis lists every key under its `prefix`, so gi
 one. Keys the adapter holds are the same as `get` would find: a corrupt document entry
 is not listed.
 
+#### Writing `list` for your own adapter
+
+Two helpers do the sorting and filtering, so your `list` returns the same order as the
+built-in adapters: `compareKeys(left, right)` is the order (plain code-unit order), and
+`keysWithPrefix(keys, prefix)` returns the keys that start with `prefix`, sorted with it.
+
+```ts
+import {
+  keysWithPrefix,
+  type StorageAdapter,
+} from '@richardmcquiston01/storage-adapters';
+
+const list: StorageAdapter['list'] = async (prefix) => ({
+  ok: true,
+  value: keysWithPrefix(myStore.keys(), prefix),
+});
+```
+
 #### Browser storage
 
 The core does no I/O. `localStorageAdapter` lives in the optional `/browser`
@@ -866,7 +884,8 @@ create it once.
 #### Typed persistence
 
 `createPersistence<T>` stores one kind of value with a versioned envelope, a
-size limit, revision tracking and a conflict policy. Rapid saves to a key
+size limit (`maxBytes`, 64 KiB by default; the default is exported as
+`DEFAULT_MAX_BYTES`), revision tracking and a conflict policy. Rapid saves to a key
 collapse into the newest, and every caller gets a result.
 
 ```ts
@@ -904,6 +923,22 @@ save again with `force: true`), `'overwrite'`, `'keep-theirs'`, or a merge
 function. `watch(key, onChange)` reports changes from elsewhere when the
 adapter has `subscribe`. Pass `field` and `version` to match an existing
 envelope.
+
+### Stability
+
+From 1.0.0 the package follows semantic versioning (see
+[docs/export-audit.md](docs/export-audit.md) for the full list). Each entry point is
+either **Stable** or **Experimental**:
+
+- **Stable:** the core contract, the wrappers and `createPersistence`; `/browser`,
+  `/indexeddb`, `/sqlite`, `/file`, `/json-file`, `/yaml-file`, `/ini-file`,
+  `/postgres`, `/mysql`, `/redis`, `/s3` and `/rest`. A breaking change needs a new
+  major version.
+- **Experimental:** `/firebase`, `/firebase/realtime`, `/supabase`, `/react`, and
+  Postgres's `listener` option. They are tagged `@experimental` in the type
+  definitions and may change in a minor release, with a note in the changelog. They
+  become Stable once they have run against the real service (for `/react`, in a real
+  React app).
 
 ### Examples
 

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { firestoreAdapter } from '../src/firebase/index.js';
 import {
-  firestoreAdapter,
   firestoreDocumentId,
   firestorePrefixUpperBound,
-} from '../src/firebase/index.js';
+} from '../src/firebase/firestore.js';
 import type { StoredValue, StoreResult } from '../src/storage.js';
 import { runConformance } from './support/conformance.js';
 import { fakeFirestore, firestoreError } from './support/fake-firestore.js';

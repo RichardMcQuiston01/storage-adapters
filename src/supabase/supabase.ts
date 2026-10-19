@@ -135,6 +135,8 @@ function isSafeIdentifier(name: string): boolean {
  * called through `rpc`: `<table>_set`, which checks the revision and writes in one
  * statement, and `<table>_list`. Safe to run again. Add the policies you want, or
  * use the service-role key on a server (which bypasses them).
+ *
+ * @experimental May change in a minor release until it has been run against the real service. See docs/export-audit.md.
  */
 export function supabaseSetupSql(
   options: { readonly table?: string; readonly schema?: string } = {}
@@ -326,6 +328,8 @@ let channelCounter = 0;
  * `subscribe` reports your own writes and, through one Realtime channel on the table,
  * changes other clients make (while a subscriber is listening). Nothing throws:
  * every failure is a `StoreResult`.
+ *
+ * @experimental May change in a minor release until it has been run against the real service. See docs/export-audit.md.
  */
 export function supabaseAdapter(
   options: SupabaseAdapterOptions

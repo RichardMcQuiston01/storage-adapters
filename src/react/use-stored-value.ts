@@ -108,6 +108,8 @@ async function settled<T>(
  * if (theme.status === 'loading') return null;
  * return <button onClick={() => void theme.set('dark')}>{theme.value ?? 'light'}</button>;
  * ```
+ *
+ * @experimental May change in a minor release until it has run in a real React app (it is tested with `react-test-renderer`). See docs/export-audit.md.
  */
 export function useStoredValue(
   adapter: StorageAdapter,
