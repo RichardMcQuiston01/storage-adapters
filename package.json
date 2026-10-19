@@ -1,6 +1,6 @@
 {
   "name": "@richardmcquiston01/storage-adapters",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value contract with typed errors and revisions, composable wrappers (prefix, fallback, retry, cache, encoding), and a generic persistence helper with conflict handling. No I/O in the core.",
   "keywords": [
     "typescript",
@@ -102,6 +102,16 @@
       "require": {
         "types": "./dist/s3.d.cts",
         "default": "./dist/s3.cjs"
+      }
+    },
+    "./memcached": {
+      "import": {
+        "types": "./dist/memcached.d.ts",
+        "default": "./dist/memcached.js"
+      },
+      "require": {
+        "types": "./dist/memcached.d.cts",
+        "default": "./dist/memcached.cjs"
       }
     },
     "./nats": {
@@ -256,6 +266,9 @@
       "s3": [
         "./dist/s3.d.ts"
       ],
+      "memcached": [
+        "./dist/memcached.d.ts"
+      ],
       "nats": [
         "./dist/nats.d.ts"
       ],
@@ -350,6 +363,7 @@
     "globals": "^17.13.0",
     "ini": "^7.0.0",
     "ioredis": "^6.0.0",
+    "memcache-client": "^1.0.5",
     "mysql2": "^3.24.6",
     "pg": "^8.23.1",
     "playwright-core": "1.56.1",
