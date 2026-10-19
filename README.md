@@ -343,6 +343,39 @@ the latest state. If the subscriber cannot start, writes still work, the failure
 to `onSubscriberError`, and the adapter tries again every `subscriberRetryMs`
 (default 5000, `0` for never) while anyone is subscribed.
 
+#### NATS KV storage
+
+For servers that run NATS with JetStream, use `natsKvAdapter` from the optional
+`/nats` entry point. It imports no client: you connect with the `@nats-io` packages,
+open (or create) a key-value bucket, and pass the bucket in.
+
+```ts
+import { connect } from '@nats-io/transport-node';
+import { Kvm } from '@nats-io/kv';
+import { natsKvAdapter } from '@richardmcquiston01/storage-adapters/nats';
+
+const connection = await connect({ servers: 'nats://127.0.0.1:4222' });
+const bucket = await new Kvm(connection).create('settings');
+const adapter: StorageAdapter = natsKvAdapter({ kv: bucket });
+```
+
+Revisions are the bucket's stream sequence numbers: they only grow, but they are
+shared by every key in the bucket, not counted per key. `set` with `ifRevision` uses
+the server's own check (`update`), so it reports `conflict` when another connection
+or process wrote first, and a key with nothing stored is created. `remove` purges
+the key, so no older value is left in the bucket's history.
+
+NATS keys may hold only letters, digits and a few symbols, so the adapter escapes
+every other byte of a key (`a.b` is stored as `a=2Eb`). Prefixes survive the
+escaping. `list(prefix)` reads every key in the bucket and filters, because NATS
+cannot match part of a name; keys written by something else with names the adapter
+would not have made are skipped. `subscribe` opens a watch on the key, so it hears
+writes from any process, and writes made through the same adapter are reported once.
+If a watch fails or ends, the failure goes to `onWatchError` and the adapter watches
+again every `watchRetryMs` (default 5000, `0` for never) while anyone is subscribed,
+reporting what changed in the meantime. A value larger than the server's maximum
+payload (1 MB by default) is `invalid`.
+
 #### Firestore storage
 
 For apps on Firebase, use `firestoreAdapter` from the optional `/firebase` entry
@@ -757,6 +790,7 @@ Choose by how much data you have and who writes it:
 | `postgresAdapter`, `mysqlAdapter` | Several servers sharing one database | Needs a driver and a running server |
 | `restAdapter` | Values kept behind your own HTTP API | One request per call; you provide the API |
 | `s3Adapter` | Values shared by many servers, no database to run | One or more requests per call; `ifRevision` needs a store that enforces conditional writes |
+| `natsKvAdapter` | Settings shared by services that already use NATS | `list` reads every key in the bucket; revisions are shared across the bucket |
 
 #### YAML and INI file storage
 
@@ -951,7 +985,7 @@ either **Stable** or **Experimental**:
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/browser-real.test.ts` for the browser adapters in a real Chromium, Firefox or WebKit (run `bun run test:browser`, with `TEST_BROWSER=firefox` or `webkit` for the others), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/browser-real.test.ts` for the browser adapters in a real Chromium, Firefox or WebKit (run `bun run test:browser`, with `TEST_BROWSER=firefox` or `webkit` for the others), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/nats.test.ts` and `test/nats-server.test.ts` for the NATS KV adapter (set `TEST_NATS_URL`, for example `nats://127.0.0.1:4222` for a server started with `-js`, to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 

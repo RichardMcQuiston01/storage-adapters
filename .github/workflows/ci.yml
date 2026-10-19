@@ -165,6 +165,28 @@ jobs:
           done
           bun test test/databases.test.ts
 
+  # The NATS KV adapter, against a real NATS server with JetStream. The default test
+  # run skips it (it uses an in-memory bucket).
+  nats:
+    runs-on: ubuntu-latest
+    env:
+      TEST_NATS_URL: nats://127.0.0.1:4222
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      # A service container cannot be given `-js`, so the server is started here.
+      - run: docker run -d --name nats -p 4222:4222 nats:2.11.8 -js
+      - run: |
+          for attempt in $(seq 1 30); do
+            (echo > /dev/tcp/127.0.0.1/4222) 2>/dev/null && exit 0
+            sleep 1
+          done
+          docker logs nats && exit 1
+      - run: bun test test/nats-server.test.ts
+
   # The S3 adapter, against an S3-compatible server. The default test run skips these
   # (it uses an in-memory store). moto implements S3's conditional writes, so it
   # checks the real request and response shapes through the AWS SDK.
