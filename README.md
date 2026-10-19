@@ -238,6 +238,10 @@ so, and subscribers hear only changes made through this adapter. `NOTIFY` is
 delivered on commit and may be missed during a reconnect, so treat a notification as
 a prompt to re-read, not as a log. MySQL has no equivalent.
 
+CockroachDB speaks the PostgreSQL protocol and works with `postgresAdapter` as it is
+(tested in CI). It has no `LISTEN`/`NOTIFY`, so leave out the `listener` option there:
+subscribers hear only changes made through the same adapter.
+
 #### MySQL storage
 
 For servers that run MySQL or MariaDB, use `mysqlAdapter` from the optional `/mysql`
@@ -254,6 +258,9 @@ const adapter: StorageAdapter = mysqlAdapter({
   client: createPool({ uri: process.env.DATABASE_URL, charset: 'utf8mb4' }),
 });
 ```
+
+MariaDB and Percona Server use the MySQL protocol and work with `mysqlAdapter` as it
+is, including `pollIntervalMs`; all three are tested in CI.
 
 The table is the same as for PostgreSQL, with the id kept as `CHAR(36)`. MySQL has
 no `RETURNING`, so each write sets `revision = LAST_INSERT_ID(revision + 1)` and
