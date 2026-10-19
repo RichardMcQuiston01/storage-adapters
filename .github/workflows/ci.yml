@@ -108,6 +108,63 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun test test/databases.test.ts test/postgres.test.ts test/postgres-listen.test.ts test/mysql.test.ts test/mysql-poll.test.ts test/redis.test.ts
 
+  # MariaDB, Percona Server and CockroachDB speak the MySQL and PostgreSQL
+  # protocols, so they run the existing adapters unchanged. Each gets the same
+  # tests as the server it imitates; CockroachDB has no LISTEN/NOTIFY, so it
+  # skips the listener tests.
+  compatible-databases:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: mysql
+          MARIADB_DATABASE: adapters
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      percona:
+        image: percona/percona-server:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: mysql
+        ports:
+          - 3308:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pmysql"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - name: MariaDB
+        env:
+          TEST_MYSQL_URL: mysql://root:mysql@127.0.0.1:3307/adapters
+        run: bun test test/databases.test.ts test/mysql.test.ts test/mysql-poll.test.ts
+      - name: Percona Server
+        env:
+          TEST_MYSQL_URL: mysql://root:mysql@127.0.0.1:3308/adapters
+        run: |
+          mysql -h 127.0.0.1 -P 3308 -uroot -pmysql -e "CREATE DATABASE IF NOT EXISTS adapters"
+          bun test test/databases.test.ts test/mysql.test.ts test/mysql-poll.test.ts
+      - name: CockroachDB
+        env:
+          TEST_POSTGRES_URL: postgres://root@127.0.0.1:26257/adapters?sslmode=disable
+        run: |
+          docker run -d --name cockroach -p 26257:26257 cockroachdb/cockroach:v25.2.0 start-single-node --insecure
+          for attempt in $(seq 1 30); do
+            docker exec cockroach ./cockroach sql --insecure -e "CREATE DATABASE IF NOT EXISTS adapters" && break
+            sleep 2
+          done
+          bun test test/databases.test.ts
+
   # The S3 adapter, against an S3-compatible server. The default test run skips these
   # (it uses an in-memory store). moto implements S3's conditional writes, so it
   # checks the real request and response shapes through the AWS SDK.
