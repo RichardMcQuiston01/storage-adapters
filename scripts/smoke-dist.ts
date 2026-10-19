@@ -23,6 +23,7 @@ import * as jsonFile from '../dist/json-file.js';
 import * as mysql from '../dist/mysql.js';
 import * as postgres from '../dist/postgres.js';
 import * as react from '../dist/react.js';
+import * as memcached from '../dist/memcached.js';
 import * as nats from '../dist/nats.js';
 import * as redis from '../dist/redis.js';
 import * as rest from '../dist/rest.js';
@@ -47,6 +48,7 @@ const entries: Record<string, Record<string, unknown>> = {
   sqlite,
   postgres,
   react,
+  memcached,
   nats,
   redis,
   rest,
