@@ -74,6 +74,16 @@
         "default": "./dist/influxdb.cjs"
       }
     },
+    "./rethinkdb": {
+      "import": {
+        "types": "./dist/rethinkdb.d.ts",
+        "default": "./dist/rethinkdb.js"
+      },
+      "require": {
+        "types": "./dist/rethinkdb.d.cts",
+        "default": "./dist/rethinkdb.cjs"
+      }
+    },
     "./sqlite": {
       "import": {
         "types": "./dist/sqlite.d.ts",
@@ -297,6 +307,9 @@
       "influxdb": [
         "./dist/influxdb.d.ts"
       ],
+      "rethinkdb": [
+        "./dist/rethinkdb.d.ts"
+      ],
       "sqlite": [
         "./dist/sqlite.d.ts"
       ],
@@ -425,6 +438,7 @@
     "react": "^19",
     "react-test-renderer": "^19",
     "redis": "^6.3.0",
+    "rethinkdb-ts": "^3.0.0",
     "tsup": "^8.5.1",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.71.1",

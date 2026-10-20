@@ -16,6 +16,7 @@ export default defineConfig({
     nats: 'src/nats/index.ts',
     neo4j: 'src/neo4j/index.ts',
     redis: 'src/redis/index.ts',
+    rethinkdb: 'src/rethinkdb/index.ts',
     rest: 'src/rest/index.ts',
     arangodb: 'src/arangodb/index.ts',
     cassandra: 'src/cassandra/index.ts',

@@ -30,6 +30,7 @@ import * as memcached from '../dist/memcached.js';
 import * as nats from '../dist/nats.js';
 import * as neo4j from '../dist/neo4j.js';
 import * as redis from '../dist/redis.js';
+import * as rethinkdb from '../dist/rethinkdb.js';
 import * as rest from '../dist/rest.js';
 import * as s3 from '../dist/s3.js';
 import * as sqlite from '../dist/sqlite.js';
@@ -57,6 +58,7 @@ const entries: Record<string, Record<string, unknown>> = {
   nats,
   neo4j,
   redis,
+  rethinkdb,
   rest,
   arangodb,
   cassandra,
