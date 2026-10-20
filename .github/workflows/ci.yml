@@ -365,6 +365,33 @@ jobs:
           bun ./wait-for-neo4j.ts
       - run: bun test test/neo4j-server.test.ts
 
+  # The ClickHouse adapter, against a real ClickHouse server. The default test run skips
+  # it (it uses an in-memory stand-in for ClickHouse's HTTP interface). The default user
+  # of the image has no password and the container is thrown away.
+  clickhouse:
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: '1'
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "wget --spider -q http://127.0.0.1:8123/ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_CLICKHOUSE_URL: http://127.0.0.1:8123
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun test test/clickhouse-server.test.ts
+
   # The InfluxDB adapter, against a real InfluxDB 2.x server. The default test run skips
   # it (it uses an in-memory stand-in for InfluxDB's HTTP API). The token belongs to a
   # throwaway container and protects nothing.
