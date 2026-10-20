@@ -217,7 +217,10 @@ if (url === undefined || url === '') {
         const answer = await flux(
           `from(bucket: "${bucket}") |> range(start: 0) |> filter(fn: (r) => r._measurement == "${measurement}")`
         );
-        const rows = answer.split('\n').filter((line) => line.startsWith(',,'));
+        // InfluxDB 2.x names the result `_result`; 1.8 leaves it empty.
+        const rows = answer
+          .split('\n')
+          .filter((line) => /^,(_result)?,\d+,/.test(line));
         // Three fields (value, revision, updated_at) of one point.
         assert.equal(rows.length, 3, answer);
         assert.ok(rows.every((row) => row.includes('1970-01-01T00:00:00Z')));
@@ -226,7 +229,7 @@ if (url === undefined || url === '') {
       });
     });
 
-    void it('keeps the value exactly, including newlines, NUL, quotes, backslashes, emoji and a 5 MB value', async () => {
+    void it('keeps the value exactly, including newlines, NUL, quotes, backslashes, emoji and a 900 kB value', async () => {
       await withMeasurement(async (measurement) => {
         const adapter = adapterFor(measurement);
         for (const value of [
@@ -238,7 +241,7 @@ if (url === undefined || url === '') {
           '',
           '123',
           '  padded  ',
-          'x'.repeat(5 * 1024 * 1024),
+          'x'.repeat(900_000),
         ]) {
           expectOk(await adapter.set('k', value, { signal }));
           assert.equal(
@@ -246,6 +249,25 @@ if (url === undefined || url === '') {
             value
           );
         }
+      });
+    });
+
+    void it('refuses a value over the 1 MiB field limit, naming the key, and keeps the old value', async () => {
+      await withMeasurement(async (measurement) => {
+        const adapter = adapterFor(measurement);
+        expectOk(await adapter.set('big', 'small', { signal }));
+        // Escaping makes each newline two bytes, so this is over the limit once stored.
+        const result = await adapter.set('big', '\n'.repeat(600_000), {
+          signal,
+        });
+        assert.ok(!result.ok);
+        assert.equal(result.code, 'invalid');
+        assert.ok(result.error.includes('"big"'), result.error);
+        assert.match(result.error, /limits a string field to 1 MiB/);
+        assert.equal(
+          expectOk(await adapter.get('big', { signal }))?.value,
+          'small'
+        );
       });
     });
 

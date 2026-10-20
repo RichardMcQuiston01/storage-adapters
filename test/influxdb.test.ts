@@ -475,6 +475,28 @@ void describe('influxDbAdapter: failures', () => {
     assert.deepEqual(influx.requests, []);
   });
 
+  void it('refuses a value over the string field limit once escaped, without asking InfluxDB', async () => {
+    const influx = new FakeInfluxDb();
+    const adapter = adapterFor(influx);
+    const message = expectFailure(
+      await adapter.set('k', '\n'.repeat(600_000), { signal }),
+      'invalid',
+      'k'
+    );
+    assert.match(message, /limits a string field to 1 MiB.*1200000 bytes/);
+    expectFailure(
+      await adapter.set('k', 'x'.repeat(1_000_001), { signal }),
+      'invalid',
+      'k'
+    );
+    assert.deepEqual(influx.requests, []);
+    expectOk(await adapter.set('k', 'x'.repeat(1_000_000), { signal }));
+    assert.equal(
+      expectOk(await adapter.get('k', { signal }))?.value,
+      'x'.repeat(1_000_000)
+    );
+  });
+
   const cases: readonly [number, string, string][] = [
     [
       401,

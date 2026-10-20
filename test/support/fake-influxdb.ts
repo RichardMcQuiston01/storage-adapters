@@ -234,14 +234,30 @@ export class FakeInfluxDb {
       const key = tags.get('entry_key') ?? '';
       tags.delete('entry_key');
       const fields = new Map<string, string>();
-      const pattern = /([A-Za-z_]+)=(?:"((?:[^"\\]|\\.)*)"|(\d+)i)/g;
-      let match = pattern.exec(fieldText);
-      while (match !== null) {
-        fields.set(
-          match[1] ?? '',
-          (match[2] ?? match[3] ?? '').replace(/\\(.)/g, '$1')
-        );
-        match = pattern.exec(fieldText);
+      // Read `name="text"` and `name=123i` pairs by hand: a regex chokes on megabyte values.
+      let cursor = 0;
+      while (cursor < fieldText.length) {
+        const equals = fieldText.indexOf('=', cursor);
+        const name = fieldText.slice(cursor, equals);
+        let text = '';
+        if (fieldText.charAt(equals + 1) === '"') {
+          cursor = equals + 2;
+          while (fieldText.charAt(cursor) !== '"') {
+            if (fieldText.charAt(cursor) === '\\') {
+              cursor += 1;
+            }
+            text += fieldText.charAt(cursor);
+            cursor += 1;
+          }
+          cursor += 1;
+        } else {
+          const end = fieldText.indexOf(',', equals);
+          const stop = end < 0 ? fieldText.length : end;
+          text = fieldText.slice(equals + 1, stop).replace(/i$/, '');
+          cursor = stop;
+        }
+        fields.set(name, text);
+        cursor += 1; // the comma
       }
       this.beforeWrite?.(measurement, key);
       const points = this.pointsFor(measurement);

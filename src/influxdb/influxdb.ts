@@ -16,6 +16,7 @@ import { decodeUtf8, utf8Bytes } from '../utf8.js';
 import {
   compareKeys,
   prefixFailure,
+  utf8Length,
   type StorageAdapter,
   type StoredValue,
   type StoreErrorCode,
@@ -64,6 +65,8 @@ const MEASUREMENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 /** The longest key, once escaped. Tag values this long are well inside InfluxDB's limits. */
 const MAX_ENCODED_KEY_LENGTH = 1024;
 const MAX_DETAIL_LENGTH = 200;
+/** InfluxDB refuses a string field over 1 MiB; this leaves a margin. */
+const MAX_VALUE_BYTES = 1_000_000;
 /** The one timestamp every entry is written at, so a new write replaces the old point. */
 const TIMESTAMP_START = '1970-01-01T00:00:00Z';
 const TIMESTAMP_END = '1970-01-01T00:00:01Z';
@@ -681,6 +684,15 @@ export function influxDbAdapter(
           'invalid',
           key,
           'cannot store this value: it is not valid Unicode text'
+        );
+      }
+      const stored: number = utf8Length(escapeInfluxValue(value));
+      if (stored > MAX_VALUE_BYTES) {
+        return sqlFailure(
+          LABEL,
+          'invalid',
+          key,
+          `cannot store this value: InfluxDB limits a string field to 1 MiB and this value takes ${String(stored)} bytes once escaped (the limit here is ${String(MAX_VALUE_BYTES)})`
         );
       }
       if (ifRevision !== undefined) {

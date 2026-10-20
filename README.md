@@ -617,6 +617,9 @@ history. That has consequences:
   or Neo4j.
 - A write without `ifRevision` is one request. Revisions are the time of the write plus
   random digits; they are unique, not ordered.
+- A value can be at most about 1 MB once escaped (InfluxDB refuses a string field over
+  1 MiB); a larger one is refused with `invalid` before anything is sent. Use this adapter
+  for settings and state, not documents.
 - InfluxDB 3 is not supported: it has no Flux and no delete by predicate.
 
 Each entry is one point: the key is the tag `entry_key` (`key` is a reserved word in InfluxDB's delete predicates), and `value`, `revision` and
