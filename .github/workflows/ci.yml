@@ -409,7 +409,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       rethinkdb:
-        image: rethinkdb:2.4.4
+        image: rethinkdb:2.4.4-bookworm-slim
         ports:
           - 28015:28015
     env:
