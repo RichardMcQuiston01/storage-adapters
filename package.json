@@ -64,6 +64,16 @@
         "default": "./dist/indexeddb.cjs"
       }
     },
+    "./influxdb": {
+      "import": {
+        "types": "./dist/influxdb.d.ts",
+        "default": "./dist/influxdb.js"
+      },
+      "require": {
+        "types": "./dist/influxdb.d.cts",
+        "default": "./dist/influxdb.cjs"
+      }
+    },
     "./sqlite": {
       "import": {
         "types": "./dist/sqlite.d.ts",
@@ -283,6 +293,9 @@
       ],
       "indexeddb": [
         "./dist/indexeddb.d.ts"
+      ],
+      "influxdb": [
+        "./dist/influxdb.d.ts"
       ],
       "sqlite": [
         "./dist/sqlite.d.ts"

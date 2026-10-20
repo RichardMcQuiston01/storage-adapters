@@ -25,6 +25,7 @@ import * as jsonFile from '../dist/json-file.js';
 import * as mysql from '../dist/mysql.js';
 import * as postgres from '../dist/postgres.js';
 import * as react from '../dist/react.js';
+import * as influxdb from '../dist/influxdb.js';
 import * as memcached from '../dist/memcached.js';
 import * as nats from '../dist/nats.js';
 import * as neo4j from '../dist/neo4j.js';
@@ -51,6 +52,7 @@ const entries: Record<string, Record<string, unknown>> = {
   sqlite,
   postgres,
   react,
+  influxdb,
   memcached,
   nats,
   neo4j,
