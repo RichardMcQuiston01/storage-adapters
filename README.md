@@ -619,7 +619,7 @@ history. That has consequences:
   random digits; they are unique, not ordered.
 - InfluxDB 3 is not supported: it has no Flux and no delete by predicate.
 
-Each entry is one point: the key is the tag `key`, and `value`, `revision` and
+Each entry is one point: the key is the tag `entry_key` (`key` is a reserved word in InfluxDB's delete predicates), and `value`, `revision` and
 `updated_at` are fields. Tag values cannot hold newlines or be empty, so every byte of a
 key other than letters, digits and `_.:@/-` is stored as `%XX`, and the empty key as `~`;
 the escaped key can be at most 1024 characters. Values are stored with backslash,

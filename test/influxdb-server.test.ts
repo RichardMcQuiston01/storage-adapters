@@ -90,13 +90,14 @@ if (url === undefined || url === '') {
   const serverFetch: InfluxDbFetch = async (target, init) => {
     if (emulateDelete && target.includes('/api/v2/delete')) {
       const body = JSON.parse(init.body ?? '{}') as { predicate: string };
-      const match = /^_measurement="(\w+)" AND key="((?:[^"\\]|\\.)*)"$/.exec(
-        body.predicate
-      );
+      const match =
+        /^_measurement="(\w+)" AND entry_key="((?:[^"\\]|\\.)*)"$/.exec(
+          body.predicate
+        );
       assert.ok(match !== null, body.predicate);
       const tag = (match[2] ?? '').replace(/\\(.)/g, '$1').replace(/'/g, "\\'");
       await influxQl(
-        `DROP SERIES FROM "${match[1] ?? ''}" WHERE "key" = '${tag}'`
+        `DROP SERIES FROM "${match[1] ?? ''}" WHERE "entry_key" = '${tag}'`
       );
       return new Response(null, { status: 204 });
     }
@@ -323,7 +324,9 @@ if (url === undefined || url === '') {
         for (let index = 0; index < 1500; index += 1) {
           const key = `n${String(index).padStart(5, '0')}`;
           keys.push(key);
-          lines.push(`${measurement},key=${key} value="v",revision="r1" 0`);
+          lines.push(
+            `${measurement},entry_key=${key} value="v",revision="r1" 0`
+          );
         }
         await writeLine(lines.join('\n'));
         const listed = expectOk(
@@ -377,9 +380,9 @@ if (url === undefined || url === '') {
       await withMeasurement(async (measurement) => {
         const adapter = adapterFor(measurement);
         for (const line of [
-          `${measurement},key=k value="no revision" 0`,
-          `${measurement},key=k,extra=tag value="another tag",revision="r1" 0`,
-          `${measurement},key=k other=1i 0`,
+          `${measurement},entry_key=k value="no revision" 0`,
+          `${measurement},entry_key=k,extra=tag value="another tag",revision="r1" 0`,
+          `${measurement},entry_key=k other=1i 0`,
         ]) {
           await writeLine(line);
           for (const result of [

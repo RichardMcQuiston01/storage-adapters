@@ -174,7 +174,7 @@ void describe('influxDbAdapter: entries and revisions', () => {
     assert.match(
       request?.body ?? '',
       new RegExp(
-        `^${MEASUREMENT},key=a%20b%2Cc value="x \\\\"y\\\\"",revision="${written.revision as string}",updated_at=\\d+i 0$`
+        `^${MEASUREMENT},entry_key=a%20b%2Cc value="x \\\\"y\\\\"",revision="${written.revision as string}",updated_at=\\d+i 0$`
       )
     );
   });
@@ -278,7 +278,7 @@ void describe('influxDbAdapter: entries and revisions', () => {
     assert.deepEqual(JSON.parse(request?.body ?? '{}'), {
       start: '1970-01-01T00:00:00Z',
       stop: '1970-01-01T00:00:01Z',
-      predicate: '_measurement="storage_entry" AND key="a%20b"',
+      predicate: '_measurement="storage_entry" AND entry_key="a%20b"',
     });
     assert.equal(expectOk(await adapter.get('a b', { signal })), null);
   });
@@ -341,7 +341,7 @@ void describe('influxDbAdapter: requests', () => {
     assert.equal(request?.headers.Accept, 'application/csv');
     assert.match(
       request?.body ?? '',
-      /^from\(bucket: "app"\) \|> range\(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:01Z\) \|> filter\(fn: \(r\) => r\._measurement == "storage_entry" and r\.key == "k"\)/
+      /^from\(bucket: "app"\) \|> range\(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:01Z\) \|> filter\(fn: \(r\) => r\._measurement == "storage_entry" and r\.entry_key == "k"\)/
     );
   });
 
@@ -352,7 +352,7 @@ void describe('influxDbAdapter: requests', () => {
     expectOk(await adapter.get('${x}', { signal }));
     const body = influx.requests[0]?.body ?? '';
     assert.ok(body.includes('from(bucket: "we\\"ird\\\\bucket")'), body);
-    assert.ok(body.includes('r.key == "%24%7Bx%7D"'), body);
+    assert.ok(body.includes('r.entry_key == "%24%7Bx%7D"'), body);
   });
 
   void it('refuses a measurement that is not a plain name, without asking InfluxDB', async () => {

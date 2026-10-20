@@ -231,8 +231,8 @@ export class FakeInfluxDb {
         const [name = '', ...rest] = splitUnescaped(part, '=');
         tags.set(name, unescapeTag(rest.join('=')));
       }
-      const key = tags.get('key') ?? '';
-      tags.delete('key');
+      const key = tags.get('entry_key') ?? '';
+      tags.delete('entry_key');
       const fields = new Map<string, string>();
       const pattern = /([A-Za-z_]+)=(?:"((?:[^"\\]|\\.)*)"|(\d+)i)/g;
       let match = pattern.exec(fieldText);
@@ -299,14 +299,17 @@ export class FakeInfluxDb {
     const points =
       this.measurements.get(measurement.value) ?? new Map<string, FakePoint>();
     let selected: [string, FakePoint][];
-    const exact = script.indexOf('r.key == ');
-    const contains = script.indexOf('contains(value: r.key, set: [');
+    const exact = script.indexOf('r.entry_key == ');
+    const contains = script.indexOf('contains(value: r.entry_key, set: [');
     if (exact >= 0) {
-      const wanted = readFluxString(script, exact + 'r.key == '.length).value;
+      const wanted = readFluxString(
+        script,
+        exact + 'r.entry_key == '.length
+      ).value;
       selected = [...points].filter(([key]) => key === wanted);
     } else if (contains >= 0) {
       const wanted = new Set<string>();
-      let cursor = contains + 'contains(value: r.key, set: ['.length;
+      let cursor = contains + 'contains(value: r.entry_key, set: ['.length;
       while (script.charAt(cursor) === '"') {
         const part = readFluxString(script, cursor);
         wanted.add(part.value);
@@ -329,7 +332,7 @@ export class FakeInfluxDb {
         '#datatype,string,long,string',
         '#group,false,false,false',
         '#default,_result,,',
-        ',result,table,key',
+        ',result,table,entry_key',
       ];
       for (const [key] of listed) {
         lines.push(`,,0,${csvCell(key)}`);
@@ -360,7 +363,7 @@ export class FakeInfluxDb {
             '_start',
             '_stop',
             '_measurement',
-            'key',
+            'entry_key',
             ...tags.map(([name]) => name),
             ...fields.map(([name]) => name),
           ].join(','),

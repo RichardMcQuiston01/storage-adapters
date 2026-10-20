@@ -77,7 +77,7 @@ const KNOWN_COLUMNS: ReadonlySet<string> = new Set([
   '_start',
   '_stop',
   '_measurement',
-  'key',
+  'entry_key',
   'value',
   'revision',
   'updated_at',
@@ -379,7 +379,7 @@ type Reply =
 
 /**
  * A `StorageAdapter` over InfluxDB 2.x. Each entry is one point in one measurement,
- * tagged with the (escaped) key and holding the value, a revision and the time of the
+ * tagged `entry_key` with the (escaped) key and holding the value, a revision and the time of the
  * write as fields. Every point is written at the same timestamp, so InfluxDB replaces the
  * previous one instead of keeping a history. A write without `ifRevision` is one request
  * that gives the entry a fresh revision.
@@ -566,7 +566,7 @@ export function influxDbAdapter(
     signal: AbortSignal
   ): Promise<StoreResult<StoredValue | null>> => {
     const answer = await query(
-      `${source} and r.key == ${fluxString(name)}) ${pivot}`,
+      `${source} and r.entry_key == ${fluxString(name)}) ${pivot}`,
       signal
     );
     if (!answer.ok) {
@@ -598,7 +598,7 @@ export function influxDbAdapter(
     revision: string,
     signal: AbortSignal
   ): Promise<StoreResult<StoredValue>> => {
-    const line = `${measurement},key=${name.replace(/[ ,=]/g, '\\$&')} value="${escapeInfluxValue(value).replace(/["\\]/g, '\\$&')}",revision="${revision}",updated_at=${String(Date.now())}i 0`;
+    const line = `${measurement},entry_key=${name.replace(/[ ,=]/g, '\\$&')} value="${escapeInfluxValue(value).replace(/["\\]/g, '\\$&')}",revision="${revision}",updated_at=${String(Date.now())}i 0`;
     const sent = await send('POST', writeUrl, signal, line, {
       'Content-Type': 'text/plain; charset=utf-8',
     });
@@ -629,7 +629,7 @@ export function influxDbAdapter(
     const set: string = [...names.keys()].map(fluxString).join(', ');
     const controller = new AbortController();
     const answer = await query(
-      `${source} and contains(value: r.key, set: [${set}])) ${pivot}`,
+      `${source} and contains(value: r.entry_key, set: [${set}])) ${pivot}`,
       controller.signal
     );
     if (!answer.ok) {
@@ -640,7 +640,7 @@ export function influxDbAdapter(
       );
     }
     for (const row of answer.rows) {
-      const key: string | undefined = names.get(row.key ?? '');
+      const key: string | undefined = names.get(row.entry_key ?? '');
       const entry: StoredValue | undefined = entryFrom(row);
       if (key !== undefined && entry !== undefined) {
         found.set(key, entry);
@@ -723,7 +723,7 @@ export function influxDbAdapter(
         JSON.stringify({
           start: TIMESTAMP_START,
           stop: TIMESTAMP_END,
-          predicate: `_measurement=${fluxString(measurement)} AND key=${fluxString(checked.name)}`,
+          predicate: `_measurement=${fluxString(measurement)} AND entry_key=${fluxString(checked.name)}`,
         }),
         { 'Content-Type': 'application/json' }
       );
@@ -764,7 +764,7 @@ export function influxDbAdapter(
         );
       }
       const answer = await query(
-        `import "strings"\n${source} and r._field == "revision"${encodedPrefix === '' ? '' : ` and strings.hasPrefix(v: r.key, prefix: ${fluxString(encodedPrefix)})`}) |> keep(columns: ["key"]) |> group()`,
+        `import "strings"\n${source} and r._field == "revision"${encodedPrefix === '' ? '' : ` and strings.hasPrefix(v: r.entry_key, prefix: ${fluxString(encodedPrefix)})`}) |> keep(columns: ["entry_key"]) |> group()`,
         signal
       );
       if (!answer.ok) {
@@ -780,7 +780,7 @@ export function influxDbAdapter(
       }
       const keys: string[] = [];
       for (const row of answer.rows) {
-        const key: string | undefined = decodeInfluxKey(row.key ?? '');
+        const key: string | undefined = decodeInfluxKey(row.entry_key ?? '');
         if (key !== undefined && key.startsWith(keyPrefix)) {
           keys.push(key);
         }
