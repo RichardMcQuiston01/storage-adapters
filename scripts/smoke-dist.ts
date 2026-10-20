@@ -27,6 +27,7 @@ import * as postgres from '../dist/postgres.js';
 import * as react from '../dist/react.js';
 import * as memcached from '../dist/memcached.js';
 import * as nats from '../dist/nats.js';
+import * as neo4j from '../dist/neo4j.js';
 import * as redis from '../dist/redis.js';
 import * as rest from '../dist/rest.js';
 import * as s3 from '../dist/s3.js';
@@ -52,6 +53,7 @@ const entries: Record<string, Record<string, unknown>> = {
   react,
   memcached,
   nats,
+  neo4j,
   redis,
   rest,
   arangodb,

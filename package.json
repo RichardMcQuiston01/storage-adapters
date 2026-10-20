@@ -124,6 +124,16 @@
         "default": "./dist/nats.cjs"
       }
     },
+    "./neo4j": {
+      "import": {
+        "types": "./dist/neo4j.d.ts",
+        "default": "./dist/neo4j.js"
+      },
+      "require": {
+        "types": "./dist/neo4j.d.cts",
+        "default": "./dist/neo4j.cjs"
+      }
+    },
     "./redis": {
       "import": {
         "types": "./dist/redis.d.ts",
@@ -292,6 +302,9 @@
       "nats": [
         "./dist/nats.d.ts"
       ],
+      "neo4j": [
+        "./dist/neo4j.d.ts"
+      ],
       "redis": [
         "./dist/redis.d.ts"
       ],
@@ -392,6 +405,7 @@
     "ioredis": "^6.0.0",
     "memcache-client": "^1.0.5",
     "mysql2": "^3.24.6",
+    "neo4j-driver": "^6.2.0",
     "pg": "^8.23.1",
     "playwright-core": "1.56.1",
     "prettier": "^3.9.9",
