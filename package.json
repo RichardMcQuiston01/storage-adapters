@@ -1,6 +1,6 @@
 {
   "name": "@richardmcquiston01/storage-adapters",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value contract with typed errors and revisions, composable wrappers (prefix, fallback, retry, cache, encoding), and a generic persistence helper with conflict handling. No I/O in the core.",
   "keywords": [
     "typescript",
@@ -64,6 +64,26 @@
         "default": "./dist/indexeddb.cjs"
       }
     },
+    "./influxdb": {
+      "import": {
+        "types": "./dist/influxdb.d.ts",
+        "default": "./dist/influxdb.js"
+      },
+      "require": {
+        "types": "./dist/influxdb.d.cts",
+        "default": "./dist/influxdb.cjs"
+      }
+    },
+    "./rethinkdb": {
+      "import": {
+        "types": "./dist/rethinkdb.d.ts",
+        "default": "./dist/rethinkdb.js"
+      },
+      "require": {
+        "types": "./dist/rethinkdb.d.cts",
+        "default": "./dist/rethinkdb.cjs"
+      }
+    },
     "./sqlite": {
       "import": {
         "types": "./dist/sqlite.d.ts",
@@ -122,6 +142,16 @@
       "require": {
         "types": "./dist/nats.d.cts",
         "default": "./dist/nats.cjs"
+      }
+    },
+    "./neo4j": {
+      "import": {
+        "types": "./dist/neo4j.d.ts",
+        "default": "./dist/neo4j.js"
+      },
+      "require": {
+        "types": "./dist/neo4j.d.cts",
+        "default": "./dist/neo4j.cjs"
       }
     },
     "./redis": {
@@ -274,6 +304,12 @@
       "indexeddb": [
         "./dist/indexeddb.d.ts"
       ],
+      "influxdb": [
+        "./dist/influxdb.d.ts"
+      ],
+      "rethinkdb": [
+        "./dist/rethinkdb.d.ts"
+      ],
       "sqlite": [
         "./dist/sqlite.d.ts"
       ],
@@ -291,6 +327,9 @@
       ],
       "nats": [
         "./dist/nats.d.ts"
+      ],
+      "neo4j": [
+        "./dist/neo4j.d.ts"
       ],
       "redis": [
         "./dist/redis.d.ts"
@@ -392,12 +431,14 @@
     "ioredis": "^6.0.0",
     "memcache-client": "^1.0.5",
     "mysql2": "^3.24.6",
+    "neo4j-driver": "^6.2.0",
     "pg": "^8.23.1",
     "playwright-core": "1.56.1",
     "prettier": "^3.9.9",
     "react": "^19",
     "react-test-renderer": "^19",
     "redis": "^6.3.0",
+    "rethinkdb-ts": "^3.0.0",
     "tsup": "^8.5.1",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.71.1",

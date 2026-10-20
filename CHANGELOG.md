@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 0.20.0
+
+### Minor Changes
+
+- 9625e42: Add the `/neo4j` entry point with `neo4jAdapter()`, an adapter over a `neo4j-driver` `Driver`. It stores each entry as a node with a uniqueness constraint on `key` and a counter revision, takes the node's lock inside one Cypher statement so `ifRevision` is checked atomically across processes, retries lock conflicts, lists with one query, and can find changes made by other processes with `pollIntervalMs`. Tested against a real Neo4j server in CI.
+- 50f8770: Add the `/influxdb` entry point with `influxDbAdapter()`, a best-effort adapter over InfluxDB 2.x's HTTP API. It takes a `fetch`, stores each entry as a point at one fixed timestamp so a new write replaces the old one, escapes keys and values so they come back exactly, lists with a Flux query, removes with the delete API, and can find changes made by other processes with `pollIntervalMs`. InfluxDB cannot compare and write in one step, so `ifRevision` is checked by a read before the write: writers sharing one adapter take turns, but two processes can both win. The bucket must keep data forever, and a value can be at most about 1 MB. Tested against a real InfluxDB server in CI.
+- ff4db4d: Add the `/rethinkdb` entry point with `rethinkDbAdapter()`, an adapter over a `rethinkdb-ts` connection. It stores each entry as a document keyed by the entry's key (at most 127 bytes, RethinkDB's primary key limit) with a counter revision, writes with one atomic `replace` function so `ifRevision` is checked across processes, lists with a primary-key range query, and uses a changefeed for `subscribe` so it hears changes made by any process, reconnecting if the feed ends. Verified against a real RethinkDB server in CI.
+
 ## 0.19.0
 
 ### Minor Changes
