@@ -584,6 +584,60 @@ made through the same adapter unless you ask for polling (`pollIntervalMs`, at l
 with `onPollError`), which reads the subscribed keys once per interval; with nothing
 subscribed there is no query and no timer.
 
+#### ClickHouse storage
+
+For ClickHouse, use `clickHouseAdapter` from the optional `/clickhouse` entry point. It
+imports nothing: you pass in the `fetch` to use, as with the REST, CouchDB and InfluxDB
+adapters, and it talks to ClickHouse's HTTP interface (port 8123).
+
+```ts
+import { clickHouseAdapter } from '@richardmcquiston01/storage-adapters/clickhouse';
+
+const adapter: StorageAdapter = clickHouseAdapter({
+  url: 'http://127.0.0.1:8123',
+  database: 'app', // must already exist; default "default"
+  table: 'storage_entry', // default; created on first use unless createTable is false
+  fetch: (url, init) => fetch(url, init),
+  headers: {
+    'X-ClickHouse-User': 'app',
+    'X-ClickHouse-Key': process.env.CLICKHOUSE_PASSWORD ?? '',
+  },
+});
+```
+
+**ClickHouse is an analytical database, and this adapter is best-effort.** It has no
+transactions and no way to check a revision atomically. Each write appends a row to a
+`ReplacingMergeTree` table and a read takes the row with the highest revision. That has
+consequences:
+
+- `set` with `ifRevision` is one statement that inserts only if the key's newest revision
+  is the expected one, followed by a read to see whether its row won. That narrows the
+  race to the instant ClickHouse reads the key; two processes writing the same key at the
+  same moment can both be told they succeeded, and the lower revision is lost (last write
+  wins). Writers that share one adapter object take turns, so for them the check holds.
+  If you need the guarantee across processes, use a store with a compare-and-set, such
+  as PostgreSQL, Redis, Cassandra or Neo4j.
+- Revisions are unique and increase for a key, but they are not consecutive.
+- Rows are appended, so old versions stay until ClickHouse merges them, and a removed key
+  keeps one small row marked deleted. Neither shows in what you read. Writes are not
+  cheap (ClickHouse prefers few large inserts), so use this adapter for settings and
+  state that change occasionally, not for hot keys.
+- On a replicated cluster, a read can miss a write that went to another replica. Pass
+  `settings: { insert_quorum: 'auto', select_sequential_consistency: 1 }` (or whatever
+  your cluster needs) to make writes visible to the next read.
+- Keys can be up to 1024 bytes and values up to about 4 MB of UTF-8 text; a larger one is
+  `invalid`, and nothing is sent. Values travel in the statement, so the adapter raises
+  `max_query_size` for each request; a server profile that forbids changing it refuses
+  large values.
+
+The table is `entry_key String, entry_value String, revision UInt64, writer String,
+deleted UInt8, updated_at DateTime64(3)` with `ReplacingMergeTree(revision)` ordered by
+`entry_key`. With `createTable: false` the adapter assumes it exists. `list(prefix)`
+reads the keys that start with the prefix and sorts them. `subscribe` hears only writes
+made through the same adapter unless you ask for polling (`pollIntervalMs`, at least 50,
+with `onPollError`), which reads the subscribed keys once per interval; with nothing
+subscribed there is no query and no timer.
+
 #### InfluxDB storage
 
 For InfluxDB 2.x, use `influxDbAdapter` from the optional `/influxdb` entry point. It
@@ -1093,6 +1147,7 @@ Choose by how much data you have and who writes it:
 | `arangoDbAdapter` | Values in an ArangoDB you already run | One request per call; `subscribe` sees other processes only with `pollIntervalMs` |
 | `cassandraAdapter` | Values in a Cassandra cluster you already run | Lightweight transactions per write; `list` scans the table; `subscribe` sees other processes only with `pollIntervalMs` |
 | `neo4jAdapter` | Values in a Neo4j database you already run | One statement per call; `list` reads every matching key into memory; `subscribe` sees other processes only with `pollIntervalMs` |
+| `clickHouseAdapter` | Values in a ClickHouse server you already run | Best-effort: `ifRevision` is checked in one statement but not atomic across processes; rows are appended; `subscribe` sees other processes only with `pollIntervalMs` |
 | `influxDbAdapter` | Values in an InfluxDB 2.x bucket you already run | Best-effort: `ifRevision` is read-then-write, not atomic across processes; the bucket must keep data forever; `subscribe` sees other processes only with `pollIntervalMs` |
 | `rethinkDbAdapter` | Values in a RethinkDB you already run | One request per call; atomic `ifRevision`; `subscribe` hears other processes through a changefeed; keys at most 127 bytes |
 | `memcachedAdapter` | Cache-style values on a Memcached you already run | Keys can be evicted at any time; no `list`; `subscribe` sees only this adapter's writes |
@@ -1290,7 +1345,7 @@ either **Stable** or **Experimental**:
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/browser-real.test.ts` for the browser adapters in a real Chromium, Firefox or WebKit (run `bun run test:browser`, with `TEST_BROWSER=firefox` or `webkit` for the others), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/rethinkdb.test.ts` and `test/rethinkdb-server.test.ts` for the RethinkDB adapter (set `TEST_RETHINKDB_HOST`, and `TEST_RETHINKDB_PORT`, `TEST_RETHINKDB_USER` and `TEST_RETHINKDB_PASSWORD` if needed, to also run it against a real server), `test/influxdb.test.ts` and `test/influxdb-server.test.ts` for the InfluxDB adapter (set `TEST_INFLUXDB_URL`, `TEST_INFLUXDB_ORG`, `TEST_INFLUXDB_BUCKET` and `TEST_INFLUXDB_TOKEN` to also run it against a real server), `test/neo4j.test.ts` and `test/neo4j-server.test.ts` for the Neo4j adapter (set `TEST_NEO4J_URL`, for example `bolt://127.0.0.1:7687`, and `TEST_NEO4J_USER` and `TEST_NEO4J_PASSWORD` if it needs a login, to also run it against a real server), `test/cassandra.test.ts` and `test/cassandra-server.test.ts` for the Cassandra adapter (set `TEST_CASSANDRA_CONTACT_POINT`, and `TEST_CASSANDRA_DATACENTER` if it is not `datacenter1`, to also run it against a real node), `test/arangodb.test.ts` and `test/arangodb-server.test.ts` for the ArangoDB adapter (set `TEST_ARANGODB_URL`, and `TEST_ARANGODB_USER` and `TEST_ARANGODB_PASSWORD` if it needs a login, to also run it against a real server), `test/memcached.test.ts` and `test/memcached-server.test.ts` for the Memcached adapter (set `TEST_MEMCACHED_SERVER`, for example `127.0.0.1:11211`, to also run it against a real server), `test/couchdb.test.ts` and `test/couchdb-server.test.ts` for the CouchDB adapter (set `TEST_COUCHDB_URL`, and `TEST_COUCHDB_USER` and `TEST_COUCHDB_PASSWORD` if it needs a login, to also run it against a real server), `test/nats.test.ts` and `test/nats-server.test.ts` for the NATS KV adapter (set `TEST_NATS_URL`, for example `nats://127.0.0.1:4222` for a server started with `-js`, to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/browser-real.test.ts` for the browser adapters in a real Chromium, Firefox or WebKit (run `bun run test:browser`, with `TEST_BROWSER=firefox` or `webkit` for the others), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/rethinkdb.test.ts` and `test/rethinkdb-server.test.ts` for the RethinkDB adapter (set `TEST_RETHINKDB_HOST`, and `TEST_RETHINKDB_PORT`, `TEST_RETHINKDB_USER` and `TEST_RETHINKDB_PASSWORD` if needed, to also run it against a real server), `test/clickhouse.test.ts` and `test/clickhouse-server.test.ts` for the ClickHouse adapter (set `TEST_CLICKHOUSE_URL`, for example `http://127.0.0.1:8123`, and `TEST_CLICKHOUSE_USER` and `TEST_CLICKHOUSE_PASSWORD` if it needs a login, to also run it against a real server), `test/influxdb.test.ts` and `test/influxdb-server.test.ts` for the InfluxDB adapter (set `TEST_INFLUXDB_URL`, `TEST_INFLUXDB_ORG`, `TEST_INFLUXDB_BUCKET` and `TEST_INFLUXDB_TOKEN` to also run it against a real server), `test/neo4j.test.ts` and `test/neo4j-server.test.ts` for the Neo4j adapter (set `TEST_NEO4J_URL`, for example `bolt://127.0.0.1:7687`, and `TEST_NEO4J_USER` and `TEST_NEO4J_PASSWORD` if it needs a login, to also run it against a real server), `test/cassandra.test.ts` and `test/cassandra-server.test.ts` for the Cassandra adapter (set `TEST_CASSANDRA_CONTACT_POINT`, and `TEST_CASSANDRA_DATACENTER` if it is not `datacenter1`, to also run it against a real node), `test/arangodb.test.ts` and `test/arangodb-server.test.ts` for the ArangoDB adapter (set `TEST_ARANGODB_URL`, and `TEST_ARANGODB_USER` and `TEST_ARANGODB_PASSWORD` if it needs a login, to also run it against a real server), `test/memcached.test.ts` and `test/memcached-server.test.ts` for the Memcached adapter (set `TEST_MEMCACHED_SERVER`, for example `127.0.0.1:11211`, to also run it against a real server), `test/couchdb.test.ts` and `test/couchdb-server.test.ts` for the CouchDB adapter (set `TEST_COUCHDB_URL`, and `TEST_COUCHDB_USER` and `TEST_COUCHDB_PASSWORD` if it needs a login, to also run it against a real server), `test/nats.test.ts` and `test/nats-server.test.ts` for the NATS KV adapter (set `TEST_NATS_URL`, for example `nats://127.0.0.1:4222` for a server started with `-js`, to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 
