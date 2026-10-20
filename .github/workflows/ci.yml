@@ -393,10 +393,11 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      # The container starts, sets itself up and restarts; wait until the bucket exists.
+      # The container starts, sets itself up and restarts; wait until the token is
+      # accepted and the bucket exists (a missing bucket answers 404, which fails curl).
       - run: |
           for attempt in $(seq 1 60); do
-            curl -fsS -H "Authorization: Token $TEST_INFLUXDB_TOKEN" "$TEST_INFLUXDB_URL/api/v2/buckets?name=$TEST_INFLUXDB_BUCKET" | grep -q "\"name\":\"$TEST_INFLUXDB_BUCKET\"" && exit 0
+            curl -fsS -o /dev/null -H "Authorization: Token $TEST_INFLUXDB_TOKEN" "$TEST_INFLUXDB_URL/api/v2/buckets?name=$TEST_INFLUXDB_BUCKET" && exit 0
             sleep 2
           done
           echo "InfluxDB did not start" && exit 1
