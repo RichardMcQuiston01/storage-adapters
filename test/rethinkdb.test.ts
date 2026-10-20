@@ -328,6 +328,25 @@ void describe('rethinkDbAdapter: the table', () => {
     );
   });
 
+  void it('explains an ambiguous table, which several processes creating it at once can cause', async () => {
+    const rethink = new FakeRethinkDb([TABLE]);
+    const adapter = adapterFor(rethink, { createTable: false });
+    rethink.failures.push(
+      new Error(
+        'Table `test.storage_entry` is ambiguous; there are multiple tables with that name'
+      )
+    );
+    const message = expectFailure(
+      await adapter.set('k', 'v', { signal }),
+      'unavailable',
+      'k'
+    );
+    assert.match(
+      message,
+      /two tables with this name.*at the same moment.*create the table once before starting several processes/
+    );
+  });
+
   void it('uses the database and table names it is given', async () => {
     const rethink = new FakeRethinkDb();
     const adapter = adapterFor(rethink, { db: 'app', table: 'settings' });

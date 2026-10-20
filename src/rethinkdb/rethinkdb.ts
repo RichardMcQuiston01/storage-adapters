@@ -169,6 +169,8 @@ function failedWith<T>(
   let detail = `could not be ${verb} (${message})`;
   if (/does not exist/i.test(message)) {
     detail = `could not be ${verb} (${message}; check that ${where} exists)`;
+  } else if (/ambiguous/i.test(message)) {
+    detail = `could not be ${verb} (${message}; RethinkDB has two tables with this name, most likely because several processes created ${where} at the same moment, which RethinkDB cannot prevent: remove the duplicate, and create the table once before starting several processes)`;
   } else if (
     verb !== 'read' &&
     /closed|connection|timed out|timeout|ECONN|primary replica|not available/i.test(

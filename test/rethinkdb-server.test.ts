@@ -244,6 +244,16 @@ if (host === undefined || host === '') {
           adapterFor(table),
           adapterFor(table),
         ];
+        // Create the table first: processes that all create it at once can leave
+        // RethinkDB with two tables of the same name.
+        expectOk(
+          (await adapters[0]?.set('warm-up', 'creates the table', {
+            signal,
+          })) ?? {
+            ok: true,
+            value: { value: '' },
+          }
+        );
         const write = async (adapter: StorageAdapter): Promise<void> => {
           for (let done = 0; done < 15; done += 1) {
             expectOk(await adapter.set('k', 'v', { signal }));
@@ -266,6 +276,16 @@ if (host === undefined || host === '') {
       await withTable(async (table) => {
         const adapters: StorageAdapter[] = Array.from({ length: 6 }, () =>
           adapterFor(table)
+        );
+        // Create the table first: processes that all create it at once can leave
+        // RethinkDB with two tables of the same name.
+        expectOk(
+          (await adapters[0]?.set('warm-up', 'creates the table', {
+            signal,
+          })) ?? {
+            ok: true,
+            value: { value: '' },
+          }
         );
         const results = await Promise.all(
           adapters.map((adapter, index) =>

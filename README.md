@@ -655,7 +655,10 @@ const adapter: StorageAdapter = rethinkDbAdapter({
 
 Each entry is one document, `{ id: "<key>", value, revision, created_at, updated_at }`,
 with the key as the primary key and a counter revision. The table is created before
-first use (`createTable: false` for an account that may not change the schema). RethinkDB
+first use (`createTable: false` for an account that may not change the schema). If
+several processes start at the same moment and all create it, RethinkDB can end up with two
+tables of the same name, which it cannot prevent; create the table once before starting many
+processes. RethinkDB
 limits a primary key to 127 characters, so keys can be at most 127 bytes; a longer key is
 refused with `invalid`.
 
