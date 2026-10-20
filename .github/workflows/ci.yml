@@ -403,6 +403,47 @@ jobs:
           echo "InfluxDB did not start" && exit 1
       - run: bun test test/influxdb-server.test.ts
 
+  # The RethinkDB adapter, against a real RethinkDB server. The default test run skips it
+  # (it uses an in-memory stand-in for the driver).
+  rethinkdb:
+    runs-on: ubuntu-latest
+    services:
+      rethinkdb:
+        image: rethinkdb:2.4.4
+        ports:
+          - 28015:28015
+    env:
+      TEST_RETHINKDB_HOST: 127.0.0.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      # The published port accepts connections before RethinkDB is listening, so wait
+      # until the driver can really connect and run a query.
+      - run: |
+          cat > wait-for-rethinkdb.ts <<'SCRIPT'
+          import { r } from 'rethinkdb-ts';
+          for (let attempt = 1; attempt <= 60; attempt += 1) {
+            try {
+              const connection = await r.connect({
+                host: process.env.TEST_RETHINKDB_HOST ?? '127.0.0.1',
+                port: 28015,
+              });
+              await r.db('test').tableList().run(connection);
+              await connection.close();
+              process.exit(0);
+            } catch {
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+            }
+          }
+          console.error('RethinkDB did not start');
+          process.exit(1);
+          SCRIPT
+          bun ./wait-for-rethinkdb.ts
+      - run: bun test test/rethinkdb-server.test.ts
+
   # The S3 adapter, against an S3-compatible server. The default test run skips these
   # (it uses an in-memory store). moto implements S3's conditional writes, so it
   # checks the real request and response shapes through the AWS SDK.
