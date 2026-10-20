@@ -13,6 +13,7 @@ export default defineConfig({
     s3: 'src/s3/index.ts',
     memcached: 'src/memcached/index.ts',
     nats: 'src/nats/index.ts',
+    neo4j: 'src/neo4j/index.ts',
     redis: 'src/redis/index.ts',
     rest: 'src/rest/index.ts',
     arangodb: 'src/arangodb/index.ts',
