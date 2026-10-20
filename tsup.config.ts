@@ -11,6 +11,7 @@ export default defineConfig({
     postgres: 'src/postgres/index.ts',
     mysql: 'src/mysql/index.ts',
     s3: 'src/s3/index.ts',
+    influxdb: 'src/influxdb/index.ts',
     memcached: 'src/memcached/index.ts',
     nats: 'src/nats/index.ts',
     neo4j: 'src/neo4j/index.ts',

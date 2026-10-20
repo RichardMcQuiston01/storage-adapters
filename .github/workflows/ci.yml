@@ -365,6 +365,44 @@ jobs:
           bun ./wait-for-neo4j.ts
       - run: bun test test/neo4j-server.test.ts
 
+  # The InfluxDB adapter, against a real InfluxDB 2.x server. The default test run skips
+  # it (it uses an in-memory stand-in for InfluxDB's HTTP API). The token belongs to a
+  # throwaway container and protects nothing.
+  influxdb:
+    runs-on: ubuntu-latest
+    services:
+      influxdb:
+        image: influxdb:2.7
+        ports:
+          - 8086:8086
+        env:
+          DOCKER_INFLUXDB_INIT_MODE: setup
+          DOCKER_INFLUXDB_INIT_USERNAME: admin
+          DOCKER_INFLUXDB_INIT_PASSWORD: ci-only-password
+          DOCKER_INFLUXDB_INIT_ORG: adapters
+          DOCKER_INFLUXDB_INIT_BUCKET: app
+          DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ci-only-token
+    env:
+      TEST_INFLUXDB_URL: http://127.0.0.1:8086
+      TEST_INFLUXDB_ORG: adapters
+      TEST_INFLUXDB_BUCKET: app
+      TEST_INFLUXDB_TOKEN: ci-only-token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      # The container starts, sets itself up and restarts; wait until the token is
+      # accepted and the bucket exists (a missing bucket answers 404, which fails curl).
+      - run: |
+          for attempt in $(seq 1 60); do
+            curl -fsS -o /dev/null -H "Authorization: Token $TEST_INFLUXDB_TOKEN" "$TEST_INFLUXDB_URL/api/v2/buckets?name=$TEST_INFLUXDB_BUCKET" && exit 0
+            sleep 2
+          done
+          echo "InfluxDB did not start" && exit 1
+      - run: bun test test/influxdb-server.test.ts
+
   # The S3 adapter, against an S3-compatible server. The default test run skips these
   # (it uses an in-memory store). moto implements S3's conditional writes, so it
   # checks the real request and response shapes through the AWS SDK.
