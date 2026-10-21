@@ -73,10 +73,29 @@ export interface RabbitMqAdapterOptions {
   /** The stream that holds the entries. Defaults to `storage_entry`. */
   readonly stream?: string;
   /**
-   * Declare the stream before first use if it is not there. Defaults to true. The
-   * stream must never expire: do not give it a maximum age or size.
+   * Declare the stream before first use if it is not there. Defaults to true.
+   * Without `streamArguments` the stream never expires and grows with every write;
+   * see `compact` for keeping it small.
    */
   readonly createStream?: boolean;
+  /**
+   * Extra arguments for declaring the stream, for example
+   * `{ 'x-max-age': '7D', 'x-stream-max-segment-size-bytes': 1_000_000 }`. RabbitMQ
+   * deletes whole old segments once they pass the age or size limit, so also use
+   * `snapshotIntervalMs` or call `compact` more often than the limit, or the entries
+   * in the deleted part are lost. RabbitMQ refuses to declare a stream with arguments
+   * that differ from the existing one, so give every process the same
+   * `streamArguments` (or `createStream: false` where the stream is known to exist).
+   * To change an existing stream, set a RabbitMQ policy.
+   */
+  readonly streamArguments?: Readonly<Record<string, unknown>>;
+  /**
+   * Milliseconds between automatic snapshots (at least 1000). While this adapter is
+   * connected, it publishes a snapshot (see `compact`) whenever the stream has had
+   * writes since the last one. Off by default. Set it to well under the stream's
+   * maximum age.
+   */
+  readonly snapshotIntervalMs?: number;
   /**
    * `'linearizable'` (the default): `get` and `list` first put a marker through the
    * stream, so they see every write that finished before they were called, from any
@@ -97,8 +116,25 @@ export interface RabbitMqAdapterOptions {
   readonly onError?: (message: string) => void;
 }
 
-/** What `rabbitMqAdapter` returns: a `StorageAdapter` that can also stop consuming. */
+/** What `compact` reports. */
+export interface RabbitMqSnapshot {
+  /** The stream offset the snapshot is current as of. */
+  readonly through: string;
+  /** How many entries it holds. */
+  readonly entries: number;
+}
+
+/** What `rabbitMqAdapter` returns: a `StorageAdapter` that can also compact and stop consuming. */
 export interface RabbitMqAdapter extends StorageAdapter {
+  /**
+   * Publishes a snapshot: a message holding every entry as of now (revisions included).
+   * Once a snapshot is in the stream, RabbitMQ may delete everything before it, through
+   * the stream's age or size limit, and a process that starts later builds its table
+   * from the oldest snapshot still in the stream plus the messages after it, instead of
+   * from the beginning. A snapshot must fit in one message, so this fails with
+   * `invalid` for a table of more than about 8 MB.
+   */
+  compact(): Promise<StoreResult<RabbitMqSnapshot>>;
   /** Stops consuming the stream. Later calls fail with `unavailable`. Idempotent. */
   close(): Promise<void>;
 }
@@ -111,16 +147,28 @@ const MAX_KEY_BYTES = 1024;
 /** RabbitMQ's default message size limit is 16 MiB; this leaves a wide margin. */
 const MAX_VALUE_BYTES = 4_000_000;
 const PREFETCH = 500;
+/** A snapshot travels as one message, which RabbitMQ limits to 16 MiB by default. */
+const MAX_SNAPSHOT_BYTES = 8_000_000;
+const MIN_SNAPSHOT_INTERVAL_MS = 1000;
 const OFFSET_HEADER = 'x-stream-offset';
 
 /** What one message in the stream says. */
 interface Operation {
   readonly id: string;
-  readonly op: 'set' | 'remove' | 'sync';
+  readonly op: 'set' | 'remove' | 'sync' | 'snapshot';
   readonly key?: string;
   readonly value?: string;
   /** The revision the writer expected the key to hold. */
   readonly expect?: string;
+  /** A snapshot: the offset of the last message it reflects, and every entry as of then. */
+  readonly at?: number;
+  readonly entries?: readonly SnapshotEntry[];
+}
+
+interface SnapshotEntry {
+  readonly key: string;
+  readonly value: string;
+  readonly revision: string;
 }
 
 /** What happened to an operation when its message was applied, in stream order. */
@@ -153,12 +201,39 @@ function parseOperation(content: Uint8Array): Operation | undefined {
   const record = parsed as Record<string, unknown>;
   if (
     typeof record.id !== 'string' ||
-    (record.op !== 'set' && record.op !== 'remove' && record.op !== 'sync')
+    (record.op !== 'set' &&
+      record.op !== 'remove' &&
+      record.op !== 'sync' &&
+      record.op !== 'snapshot')
   ) {
     return undefined;
   }
   if (record.op === 'sync') {
     return { id: record.id, op: 'sync' };
+  }
+  if (record.op === 'snapshot') {
+    if (typeof record.at !== 'number' || !Array.isArray(record.entries)) {
+      return undefined;
+    }
+    const entries: SnapshotEntry[] = [];
+    for (const entry of record.entries as unknown[]) {
+      const item = entry as Record<string, unknown> | null;
+      if (
+        typeof item !== 'object' ||
+        item === null ||
+        typeof item.key !== 'string' ||
+        typeof item.value !== 'string' ||
+        typeof item.revision !== 'string'
+      ) {
+        return undefined;
+      }
+      entries.push({
+        key: item.key,
+        value: item.value,
+        revision: item.revision,
+      });
+    }
+    return { id: record.id, op: 'snapshot', at: record.at, entries };
   }
   if (typeof record.key !== 'string') {
     return undefined;
@@ -214,11 +289,13 @@ function codeOf(error: unknown): StoreErrorCode {
  * any process, as the messages arrive.
  *
  * The costs are the point of the design. All entries live in memory in every process,
- * and starting means reading the whole stream, so this suits settings and state, not
- * documents or many large values. The stream is never trimmed, so it grows with every
- * write and removal (use `max-age` or `max-length-bytes` on it and RabbitMQ will delete
- * the oldest messages, and with them entries that were not rewritten). `list` and, by
- * default, `get` put a small marker message through the stream first, so they are
+ * and starting means reading the stream from the beginning, so this suits settings and
+ * state, not documents or many large values. A stream left alone grows with every write
+ * and removal. To keep it small, give it a maximum age or size (`streamArguments`) and
+ * have snapshots published well within that limit (`snapshotIntervalMs`, or `compact`):
+ * a snapshot holds every entry, so RabbitMQ can delete the messages before it and a
+ * process that starts later builds its table from the oldest snapshot left. `list` and,
+ * by default, `get` put a small marker message through the stream first, so they are
  * current, at the price of a round trip each; use `readConsistency: 'local'` to skip it.
  * Nothing throws: every failure is a `StoreResult`.
  */
@@ -257,16 +334,38 @@ export function rabbitMqAdapter(
     }
   };
 
+  /** The offset of the newest set or remove applied, and of the newest snapshot's `at`. */
+  let lastWriteOffset = -1;
+  let snapshotCovered = -1;
+  /** True while history is replayed from a snapshot; nobody is told about each step. */
+  let quiet = false;
+  /**
+   * Set while the table is being built from a snapshot (the stream starts after offset
+   * 0, because RabbitMQ deleted its beginning): the first offset received, and the
+   * messages since, kept until a snapshot to build on turns up.
+   */
+  let seeking: {
+    readonly first: number;
+    readonly buffer: { offset: number; operation: Operation }[];
+  } | null = null;
+  /** What the table held when the consumer was restarted, until the rebuild has been announced. */
+  let rebuildFrom: ReadonlyMap<string, StoredValue> | null = null;
+
   /** Applies one message in stream order. */
-  const apply = (operation: Operation): Outcome => {
+  const apply = (operation: Operation, offset: number): Outcome => {
     if (operation.op === 'sync') {
+      return { applied: true, stored: null };
+    }
+    if (operation.op === 'snapshot') {
+      snapshotCovered = Math.max(snapshotCovered, operation.at ?? -1);
       return { applied: true, stored: null };
     }
     const key: string = operation.key ?? '';
     const current: StoredValue | undefined = table.get(key);
+    lastWriteOffset = offset;
     if (operation.op === 'remove') {
       table.delete(key);
-      if (current !== undefined && caughtUp) {
+      if (current !== undefined && caughtUp && !quiet) {
         listeners.notify(key, null);
       }
       return { applied: true, stored: null };
@@ -280,13 +379,57 @@ export function rabbitMqAdapter(
     }
     const stored: StoredValue = {
       value: operation.value ?? '',
-      revision: String(lastOffset),
+      revision: String(offset),
     };
     table.set(key, stored);
-    if (caughtUp) {
+    if (caughtUp && !quiet) {
       listeners.notify(key, stored);
     }
     return { applied: true, stored };
+  };
+
+  const process = (operation: Operation, offset: number): void => {
+    const outcome: Outcome = apply(operation, offset);
+    pending.get(operation.id)?.({ ok: true, outcome });
+  };
+
+  /** Starts building from a snapshot, because the stream no longer begins where we need. */
+  const beginSeeking = (first: number): void => {
+    seeking = { first, buffer: [] };
+  };
+
+  /** Takes a snapshot as the base of the table, then applies what came after it. */
+  const adoptSnapshot = (operation: Operation): void => {
+    const state = seeking;
+    if (state === null) {
+      return;
+    }
+    const at: number = operation.at ?? -1;
+    if (state.first > at) {
+      // The message it reflects is gone, so some after it may be too.
+      return;
+    }
+    table.clear();
+    for (const entry of operation.entries ?? []) {
+      table.set(entry.key, { value: entry.value, revision: entry.revision });
+    }
+    lastWriteOffset = at;
+    snapshotCovered = Math.max(snapshotCovered, at);
+    const buffered = state.buffer;
+    seeking = null;
+    const wasQuiet: boolean = quiet;
+    quiet = true;
+    for (const item of buffered) {
+      if (item.offset > at) {
+        process(item.operation, item.offset);
+      } else if (item.operation.op === 'sync') {
+        pending.get(item.operation.id)?.({
+          ok: true,
+          outcome: { applied: true, stored: null },
+        });
+      }
+    }
+    quiet = wasQuiet;
   };
 
   const onMessage = (message: RabbitMqMessageLike | null): void => {
@@ -303,6 +446,12 @@ export function rabbitMqAdapter(
         }
         return;
       }
+      if (lastOffset < 0 && offset > 0) {
+        // The stream does not begin at offset 0: RabbitMQ deleted its beginning, so the
+        // table has to be built from a snapshot. (Offsets are not contiguous, so a jump
+        // later on proves nothing.)
+        beginSeeking(offset);
+      }
       lastOffset = offset;
       const operation: Operation | undefined = parseOperation(message.content);
       if (operation === undefined) {
@@ -311,8 +460,15 @@ export function rabbitMqAdapter(
         );
         return;
       }
-      const outcome: Outcome = apply(operation);
-      pending.get(operation.id)?.({ ok: true, outcome });
+      if (seeking !== null) {
+        if (operation.op === 'snapshot') {
+          adoptSnapshot(operation);
+          return;
+        }
+        seeking.buffer.push({ offset, operation });
+        return;
+      }
+      process(operation, offset);
     } finally {
       try {
         channel?.ack(message);
@@ -415,6 +571,16 @@ export function rabbitMqAdapter(
     } catch (error: unknown) {
       return `could not open a channel (${describeUnknownError(error)})`;
     }
+    if (caughtUp) {
+      // Reconnecting: offsets are not contiguous, so we cannot tell what RabbitMQ
+      // deleted while we were away. Read the stream again and announce what differs.
+      rebuildFrom ??= new Map(table);
+      table.clear();
+      lastOffset = -1;
+      lastWriteOffset = -1;
+      seeking = null;
+      quiet = true;
+    }
     // A channel the broker closes (a bad declaration, say) emits 'error'; without a
     // listener from the start that would be thrown at the whole program.
     on.on('close', (error) => {
@@ -427,23 +593,21 @@ export function rabbitMqAdapter(
       if (options.createStream !== false) {
         await on.assertQueue(stream, {
           durable: true,
-          arguments: { 'x-queue-type': 'stream' },
+          arguments: { ...options.streamArguments, 'x-queue-type': 'stream' },
         });
       }
       await on.prefetch(PREFETCH);
       channel = on;
       const consumer = await on.consume(stream, onMessage, {
         noAck: false,
-        arguments: {
-          'x-stream-offset': lastOffset < 0 ? 'first' : lastOffset + 1,
-        },
+        arguments: { 'x-stream-offset': 'first' },
       });
       consumerTag = consumer.consumerTag;
     } catch (error: unknown) {
       if (channel === on) {
         channel = null;
       }
-      return `could not read ${where} (${describeUnknownError(error)}; it must be a stream, so declare it with x-queue-type=stream or leave createStream on)`;
+      return `could not read ${where} (${describeUnknownError(error)}; it must be a stream, and RabbitMQ refuses a declaration that differs from the existing one, so every process needs the same streamArguments, or createStream: false once the stream exists)`;
     }
     // Everything written before this marker has been applied once it comes back.
     const synced: Settled = await send(
@@ -451,9 +615,25 @@ export function rabbitMqAdapter(
       on
     );
     if (!synced.ok) {
+      if (seeking !== null) {
+        return `${where} starts at offset ${String(seeking.first)}, not 0, and holds no snapshot to build the table from (RabbitMQ deleted the beginning; a snapshot must be published before it does, with compact or snapshotIntervalMs)`;
+      }
       return `could not catch up with ${where} (${synced.detail})`;
     }
     caughtUp = true;
+    if (rebuildFrom !== null) {
+      const before = rebuildFrom;
+      rebuildFrom = null;
+      quiet = false;
+      for (const key of new Set([...before.keys(), ...table.keys()])) {
+        const was: StoredValue | undefined = before.get(key);
+        const now: StoredValue | undefined = table.get(key);
+        if (was?.revision !== now?.revision || was?.value !== now?.value) {
+          listeners.notify(key, now ?? null);
+        }
+      }
+    }
+    startSnapshots();
     return null;
   };
 
@@ -561,6 +741,99 @@ export function rabbitMqAdapter(
     }
     const settled: Settled = await marker();
     return settled.ok ? null : settled.detail;
+  };
+
+  /** Publishes a snapshot of the table as it stands now. */
+  const compact = async (): Promise<StoreResult<RabbitMqSnapshot>> => {
+    const failed = (
+      code: StoreErrorCode,
+      detail: string
+    ): StoreResult<RabbitMqSnapshot> => ({
+      ok: false,
+      code,
+      error: `${LABEL} snapshot of ${where} ${detail}`,
+    });
+    if (!streamIsUsable) {
+      return failed(
+        'invalid',
+        'cannot be made: the stream name must not be empty or longer than 255 bytes'
+      );
+    }
+    const problem: string | null = await upToDate(true);
+    if (problem !== null || channel === null) {
+      return failed(
+        'unavailable',
+        `could not be made (${problem ?? 'no channel'})`
+      );
+    }
+    // No waiting from here to the publish, so `at` and the entries agree.
+    const at: number = lastOffset;
+    const entries: SnapshotEntry[] = [...table.entries()]
+      .sort(([left], [right]) => compareKeys(left, right))
+      .map(([key, stored]) => ({
+        key,
+        value: stored.value,
+        revision: stored.revision ?? '',
+      }));
+    const content: string = JSON.stringify({
+      id: newOperationId(),
+      op: 'snapshot',
+      at,
+      entries,
+    });
+    if (utf8Length(content) > MAX_SNAPSHOT_BYTES) {
+      return failed(
+        'invalid',
+        `cannot be made: ${String(entries.length)} entries take ${String(utf8Length(content))} bytes and a snapshot must fit in one message of at most ${String(MAX_SNAPSHOT_BYTES)}`
+      );
+    }
+    const settled: Settled = await send(
+      JSON.parse(content) as Operation,
+      channel
+    );
+    if (!settled.ok) {
+      return failed(settled.code, `could not be published (${settled.detail})`);
+    }
+    return {
+      ok: true,
+      value: { through: String(at), entries: entries.length },
+    };
+  };
+
+  let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+  const snapshotIntervalMs: number | undefined =
+    options.snapshotIntervalMs === undefined
+      ? undefined
+      : Math.max(MIN_SNAPSHOT_INTERVAL_MS, options.snapshotIntervalMs);
+  /** Starts the automatic snapshots, once the table is caught up. */
+  const startSnapshots = (): void => {
+    if (snapshotIntervalMs === undefined || snapshotTimer !== null || closed) {
+      return;
+    }
+    const tick = (): void => {
+      snapshotTimer = setTimeout(() => {
+        snapshotTimer = null;
+        const dirty: boolean =
+          channel !== null &&
+          seeking === null &&
+          lastWriteOffset > snapshotCovered;
+        const done: Promise<void> = dirty
+          ? compact().then((result) => {
+              if (!result.ok) {
+                report(result.error);
+              }
+            })
+          : Promise.resolve();
+        void done.then(() => {
+          if (!closed) {
+            tick();
+          }
+        });
+      }, snapshotIntervalMs);
+      const timer = snapshotTimer as { unref?: () => void };
+      timer.unref?.();
+    };
+    tick();
   };
 
   const adapter: RabbitMqAdapter = {
@@ -713,11 +986,17 @@ export function rabbitMqAdapter(
       };
     },
 
+    compact,
+
     async close() {
       if (closed) {
         return;
       }
       closed = true;
+      if (snapshotTimer !== null) {
+        clearTimeout(snapshotTimer);
+        snapshotTimer = null;
+      }
       if (retryTimer !== null) {
         clearTimeout(retryTimer);
         retryTimer = null;

@@ -313,6 +313,129 @@ if (url === undefined || url === '') {
       });
     });
 
+    void it(
+      'keeps entries alive through retention by snapshots: a new process rebuilds from the oldest snapshot left',
+      { timeout: 120_000 },
+      async () => {
+        const firstOffset = async (stream: string): Promise<number> => {
+          const channel = await connection.createConfirmChannel();
+          await channel.prefetch(1);
+          return new Promise<number>((resolve) => {
+            void channel
+              .consume(
+                stream,
+                (message) => {
+                  if (message !== null) {
+                    resolve(
+                      message.properties.headers?.['x-stream-offset'] as number
+                    );
+                    channel.ack(message);
+                  }
+                },
+                { noAck: false, arguments: { 'x-stream-offset': 'first' } }
+              )
+              .catch(() => undefined);
+          });
+        };
+        await withStream(async (stream) => {
+          // Segments of 1 MB, and room for about eight of them: older ones are deleted.
+          const streamArguments = {
+            'x-stream-max-segment-size-bytes': 1_000_000,
+            'x-max-length-bytes': 8_000_000,
+          };
+          const writer = adapterFor(stream, { streamArguments });
+          expectOk(
+            await writer.set('keep', 'written once, at the start', { signal })
+          );
+          let latest: StoredValue | null = null;
+          for (let index = 0; index < 24; index += 1) {
+            latest = expectOk(
+              await writer.set(
+                'filler',
+                `${String(index)}:${'x'.repeat(900_000)}`,
+                {
+                  signal,
+                }
+              )
+            );
+            if (index % 2 === 1) {
+              expectOk(await writer.compact());
+            }
+          }
+          // Retention runs when segments roll; wait until the beginning is really gone.
+          let head = 0;
+          for (let attempt = 0; attempt < 100 && head === 0; attempt += 1) {
+            head = await firstOffset(stream);
+            if (head === 0) {
+              await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+          }
+          assert.ok(
+            head > 0,
+            'RabbitMQ never deleted the beginning of the stream'
+          );
+          const fresh = adapterFor(stream, { streamArguments });
+          assert.equal(
+            expectOk(await fresh.get('keep', { signal }))?.value,
+            'written once, at the start'
+          );
+          assert.deepEqual(
+            expectOk(await fresh.get('filler', { signal })),
+            latest
+          );
+          assert.deepEqual(
+            expectOk(
+              (await fresh.list?.('', { signal })) ?? { ok: true, value: [] }
+            ),
+            ['filler', 'keep']
+          );
+          // Revisions from before the deletion still work for a safe update.
+          expectOk(
+            await fresh.set('filler', 'updated', {
+              signal,
+              ifRevision: latest?.revision as string,
+            })
+          );
+        });
+      }
+    );
+
+    void it(
+      'publishes snapshots by itself with snapshotIntervalMs, which a new process can use',
+      { timeout: 30_000 },
+      async () => {
+        await withStream(async (stream) => {
+          const writer = adapterFor(stream, { snapshotIntervalMs: 1000 });
+          expectOk(await writer.set('a', '1', { signal }));
+          const other = adapterFor(stream);
+          // Find the snapshot by reading the raw stream.
+          const channel = await connection.createConfirmChannel();
+          await channel.prefetch(100);
+          const ops: string[] = [];
+          await channel.consume(
+            stream,
+            (message) => {
+              if (message !== null) {
+                ops.push(
+                  String(
+                    (JSON.parse(message.content.toString()) as { op: string })
+                      .op
+                  )
+                );
+                channel.ack(message);
+              }
+            },
+            { noAck: false, arguments: { 'x-stream-offset': 'first' } }
+          );
+          await eventually(
+            () => ops.includes('snapshot'),
+            'an automatic snapshot'
+          );
+          assert.equal(expectOk(await other.get('a', { signal }))?.value, '1');
+        });
+      }
+    );
+
     void it('says so when the queue exists but is not a stream, naming the key', async () => {
       const queue = freshStream();
       await admin.assertQueue(queue, { durable: true });
@@ -327,6 +450,25 @@ if (url === undefined || url === '') {
         await closeAll();
         await admin.deleteQueue(queue);
       }
+    });
+
+    void it('says why when another process declared the stream with different arguments', async () => {
+      await withStream(async (stream) => {
+        const first = adapterFor(stream, {
+          streamArguments: { 'x-max-length-bytes': 8_000_000 },
+        });
+        expectOk(await first.set('a', '1', { signal }));
+        const second = adapterFor(stream);
+        const result = await second.get('a', { signal });
+        assert.ok(!result.ok);
+        assert.equal(result.code, 'unavailable');
+        assert.match(
+          result.error,
+          /every process needs the same streamArguments/
+        );
+        const trusting = adapterFor(stream, { createStream: false });
+        assert.equal(expectOk(await trusting.get('a', { signal }))?.value, '1');
+      });
     });
 
     void it('says so when the stream is missing and createStream is off', async () => {
