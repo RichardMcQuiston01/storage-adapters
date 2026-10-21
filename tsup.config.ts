@@ -12,6 +12,7 @@ export default defineConfig({
     mysql: 'src/mysql/index.ts',
     s3: 'src/s3/index.ts',
     clickhouse: 'src/clickhouse/index.ts',
+    rabbitmq: 'src/rabbitmq/index.ts',
     influxdb: 'src/influxdb/index.ts',
     memcached: 'src/memcached/index.ts',
     nats: 'src/nats/index.ts',

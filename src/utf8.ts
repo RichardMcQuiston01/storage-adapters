@@ -65,3 +65,12 @@ export function utf8Bytes(codePoint: number): number[] {
     0x80 | (codePoint & 0x3f),
   ];
 }
+
+/** The UTF-8 bytes of text; the text must be valid Unicode (no lone surrogates). */
+export function encodeUtf8(text: string): Uint8Array {
+  const bytes: number[] = [];
+  for (const char of text) {
+    bytes.push(...utf8Bytes(char.codePointAt(0) ?? 0));
+  }
+  return Uint8Array.from(bytes);
+}

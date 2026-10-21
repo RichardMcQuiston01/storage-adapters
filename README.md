@@ -638,6 +638,56 @@ made through the same adapter unless you ask for polling (`pollIntervalMs`, at l
 with `onPollError`), which reads the subscribed keys once per interval; with nothing
 subscribed there is no query and no timer.
 
+#### RabbitMQ storage
+
+For RabbitMQ, use `rabbitMqAdapter` from the optional `/rabbitmq` entry point. It imports
+no client: you connect with `amqplib`, open a **confirm channel**, and pass it in (or a
+function that opens one, so the adapter can reconnect).
+
+```ts
+import { connect } from 'amqplib';
+import { rabbitMqAdapter } from '@richardmcquiston01/storage-adapters/rabbitmq';
+
+const connection = await connect(process.env.RABBITMQ_URL ?? '');
+const adapter = rabbitMqAdapter({
+  channel: () => connection.createConfirmChannel(),
+  toBuffer: (bytes) => Buffer.from(bytes), // amqplib only accepts a Buffer
+  stream: 'storage_entry', // default; declared as a stream unless createStream is false
+});
+// ...
+await adapter.close(); // stops consuming; the connection is yours to close
+```
+
+**RabbitMQ is a message broker with no get-by-key, so this adapter keeps its data as a
+log.** Every `set` and `remove` is a message appended to a [stream](https://www.rabbitmq.com/docs/streams),
+and each adapter reads the whole stream into a table in memory when it starts and keeps
+following it. That makes it behave differently from the database adapters:
+
+- **`ifRevision` is atomic across processes.** Every process sees the same messages in
+  the same order, and a write applies only if the key still held the expected revision
+  at its place in the log. A write returns once it has come back from the stream and been
+  applied, so the writer knows whether it won (`conflict` if not). A key with nothing
+  stored is created. Revisions are stream offsets: unique and growing, not a count per key.
+- **`subscribe` hears every change from any process**, as the messages arrive, with no
+  polling. History replayed at start is not announced.
+- **Everything is in memory, and starting replays the whole stream.** Use it for settings
+  and state, not documents or many large values. Keys can be up to 1024 bytes and values
+  about 4 MB.
+- **The stream is never trimmed, so it grows with every write and removal.** Do not give
+  it a maximum age or size: RabbitMQ would delete the oldest messages, and with them any
+  entry that was not rewritten since. (Compacting it is up to you for now: copy the
+  current state into a new stream and switch over.)
+- **Reads cost a round trip by default.** `get` and `list` put a small marker message
+  through the stream first, so they see every write that finished before they were
+  called, from any process; callers that arrive together share one marker. Pass
+  `readConsistency: 'local'` to read this adapter's copy instead: no marker, but possibly
+  a moment behind another process.
+- A call that gets no reply within `timeoutMs` (10 seconds) is `unavailable`, and the
+  write may still be applied. If the channel closes, the adapter opens a new one and
+  resumes where it stopped (with `retryMs`, while anyone is subscribed; otherwise on the
+  next call). A queue that exists but is not a stream is reported, as RabbitMQ refuses to
+  redeclare it.
+
 #### InfluxDB storage
 
 For InfluxDB 2.x, use `influxDbAdapter` from the optional `/influxdb` entry point. It
@@ -1148,6 +1198,7 @@ Choose by how much data you have and who writes it:
 | `cassandraAdapter` | Values in a Cassandra cluster you already run | Lightweight transactions per write; `list` scans the table; `subscribe` sees other processes only with `pollIntervalMs` |
 | `neo4jAdapter` | Values in a Neo4j database you already run | One statement per call; `list` reads every matching key into memory; `subscribe` sees other processes only with `pollIntervalMs` |
 | `clickHouseAdapter` | Values in a ClickHouse server you already run | Best-effort: `ifRevision` is checked in one statement but not atomic across processes; rows are appended; `subscribe` sees other processes only with `pollIntervalMs` |
+| `rabbitMqAdapter` | Values kept as an append-only log in a RabbitMQ stream you already run | Atomic `ifRevision` (decided in log order); `subscribe` hears all processes; every entry is held in memory and the stream is replayed on start, so for settings and state |
 | `influxDbAdapter` | Values in an InfluxDB 2.x bucket you already run | Best-effort: `ifRevision` is read-then-write, not atomic across processes; the bucket must keep data forever; `subscribe` sees other processes only with `pollIntervalMs` |
 | `rethinkDbAdapter` | Values in a RethinkDB you already run | One request per call; atomic `ifRevision`; `subscribe` hears other processes through a changefeed; keys at most 127 bytes |
 | `memcachedAdapter` | Cache-style values on a Memcached you already run | Keys can be evicted at any time; no `list`; `subscribe` sees only this adapter's writes |
@@ -1345,7 +1396,7 @@ either **Stable** or **Experimental**:
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/browser-real.test.ts` for the browser adapters in a real Chromium, Firefox or WebKit (run `bun run test:browser`, with `TEST_BROWSER=firefox` or `webkit` for the others), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/rethinkdb.test.ts` and `test/rethinkdb-server.test.ts` for the RethinkDB adapter (set `TEST_RETHINKDB_HOST`, and `TEST_RETHINKDB_PORT`, `TEST_RETHINKDB_USER` and `TEST_RETHINKDB_PASSWORD` if needed, to also run it against a real server), `test/clickhouse.test.ts` and `test/clickhouse-server.test.ts` for the ClickHouse adapter (set `TEST_CLICKHOUSE_URL`, for example `http://127.0.0.1:8123`, and `TEST_CLICKHOUSE_USER` and `TEST_CLICKHOUSE_PASSWORD` if it needs a login, to also run it against a real server), `test/influxdb.test.ts` and `test/influxdb-server.test.ts` for the InfluxDB adapter (set `TEST_INFLUXDB_URL`, `TEST_INFLUXDB_ORG`, `TEST_INFLUXDB_BUCKET` and `TEST_INFLUXDB_TOKEN` to also run it against a real server), `test/neo4j.test.ts` and `test/neo4j-server.test.ts` for the Neo4j adapter (set `TEST_NEO4J_URL`, for example `bolt://127.0.0.1:7687`, and `TEST_NEO4J_USER` and `TEST_NEO4J_PASSWORD` if it needs a login, to also run it against a real server), `test/cassandra.test.ts` and `test/cassandra-server.test.ts` for the Cassandra adapter (set `TEST_CASSANDRA_CONTACT_POINT`, and `TEST_CASSANDRA_DATACENTER` if it is not `datacenter1`, to also run it against a real node), `test/arangodb.test.ts` and `test/arangodb-server.test.ts` for the ArangoDB adapter (set `TEST_ARANGODB_URL`, and `TEST_ARANGODB_USER` and `TEST_ARANGODB_PASSWORD` if it needs a login, to also run it against a real server), `test/memcached.test.ts` and `test/memcached-server.test.ts` for the Memcached adapter (set `TEST_MEMCACHED_SERVER`, for example `127.0.0.1:11211`, to also run it against a real server), `test/couchdb.test.ts` and `test/couchdb-server.test.ts` for the CouchDB adapter (set `TEST_COUCHDB_URL`, and `TEST_COUCHDB_USER` and `TEST_COUCHDB_PASSWORD` if it needs a login, to also run it against a real server), `test/nats.test.ts` and `test/nats-server.test.ts` for the NATS KV adapter (set `TEST_NATS_URL`, for example `nats://127.0.0.1:4222` for a server started with `-js`, to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/browser-real.test.ts` for the browser adapters in a real Chromium, Firefox or WebKit (run `bun run test:browser`, with `TEST_BROWSER=firefox` or `webkit` for the others), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/rethinkdb.test.ts` and `test/rethinkdb-server.test.ts` for the RethinkDB adapter (set `TEST_RETHINKDB_HOST`, and `TEST_RETHINKDB_PORT`, `TEST_RETHINKDB_USER` and `TEST_RETHINKDB_PASSWORD` if needed, to also run it against a real server), `test/clickhouse.test.ts` and `test/clickhouse-server.test.ts` for the ClickHouse adapter (set `TEST_CLICKHOUSE_URL`, for example `http://127.0.0.1:8123`, and `TEST_CLICKHOUSE_USER` and `TEST_CLICKHOUSE_PASSWORD` if it needs a login, to also run it against a real server), `test/rabbitmq.test.ts` and `test/rabbitmq-server.test.ts` for the RabbitMQ adapter (set `TEST_RABBITMQ_URL`, for example `amqp://guest:guest@127.0.0.1:5672`, to also run it against a real broker), `test/influxdb.test.ts` and `test/influxdb-server.test.ts` for the InfluxDB adapter (set `TEST_INFLUXDB_URL`, `TEST_INFLUXDB_ORG`, `TEST_INFLUXDB_BUCKET` and `TEST_INFLUXDB_TOKEN` to also run it against a real server), `test/neo4j.test.ts` and `test/neo4j-server.test.ts` for the Neo4j adapter (set `TEST_NEO4J_URL`, for example `bolt://127.0.0.1:7687`, and `TEST_NEO4J_USER` and `TEST_NEO4J_PASSWORD` if it needs a login, to also run it against a real server), `test/cassandra.test.ts` and `test/cassandra-server.test.ts` for the Cassandra adapter (set `TEST_CASSANDRA_CONTACT_POINT`, and `TEST_CASSANDRA_DATACENTER` if it is not `datacenter1`, to also run it against a real node), `test/arangodb.test.ts` and `test/arangodb-server.test.ts` for the ArangoDB adapter (set `TEST_ARANGODB_URL`, and `TEST_ARANGODB_USER` and `TEST_ARANGODB_PASSWORD` if it needs a login, to also run it against a real server), `test/memcached.test.ts` and `test/memcached-server.test.ts` for the Memcached adapter (set `TEST_MEMCACHED_SERVER`, for example `127.0.0.1:11211`, to also run it against a real server), `test/couchdb.test.ts` and `test/couchdb-server.test.ts` for the CouchDB adapter (set `TEST_COUCHDB_URL`, and `TEST_COUCHDB_USER` and `TEST_COUCHDB_PASSWORD` if it needs a login, to also run it against a real server), `test/nats.test.ts` and `test/nats-server.test.ts` for the NATS KV adapter (set `TEST_NATS_URL`, for example `nats://127.0.0.1:4222` for a server started with `-js`, to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 
