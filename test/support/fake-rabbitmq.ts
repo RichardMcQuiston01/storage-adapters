@@ -24,6 +24,8 @@ interface Consumer {
 /** The broker: streams live here, and outlive any channel. */
 export class FakeRabbitMq {
   readonly streams = new Map<string, Uint8Array[]>();
+  /** The offset of the first message still held, per stream (RabbitMQ deletes from the front). */
+  readonly bases = new Map<string, number>();
   readonly plainQueues = new Set<string>();
   /** Errors to hand to the callback of the next publishes, in order. */
   readonly publishFailures: unknown[] = [];
@@ -48,12 +50,22 @@ export class FakeRabbitMq {
     this.streams.set(stream, messages);
     messages.push(content);
     this.deliver();
-    return messages.length - 1;
+    return (this.bases.get(stream) ?? 0) + messages.length - 1;
+  }
+
+  /** Deletes the messages before this offset, as stream retention does. */
+  truncate(stream: string, upTo: number): void {
+    const messages = this.streams.get(stream) ?? [];
+    const base = this.bases.get(stream) ?? 0;
+    const drop = Math.max(0, Math.min(upTo - base, messages.length));
+    messages.splice(0, drop);
+    this.bases.set(stream, base + drop);
   }
 
   /** Delivers a message to the consumers again, as a broker may after a failure. */
   redeliver(stream: string, offset: number): void {
-    const content = this.streams.get(stream)?.[offset];
+    const content =
+      this.streams.get(stream)?.[offset - (this.bases.get(stream) ?? 0)];
     if (content === undefined) {
       return;
     }
@@ -99,14 +111,16 @@ export class FakeRabbitMq {
     queueMicrotask(() => {
       for (const consumer of [...this.consumers]) {
         const messages = this.streams.get(consumer.stream) ?? [];
+        const base = this.bases.get(consumer.stream) ?? 0;
+        consumer.next = Math.max(consumer.next, base);
         while (
-          consumer.next < messages.length &&
+          consumer.next - base < messages.length &&
           this.consumers.has(consumer)
         ) {
           const offset = consumer.next;
           consumer.next += 1;
           consumer.onMessage({
-            content: messages[offset] as Uint8Array,
+            content: messages[offset - base] as Uint8Array,
             properties: { headers: { 'x-stream-offset': offset } },
           });
         }
@@ -204,7 +218,12 @@ export class FakeChannel implements RabbitMqChannelLike {
       tag,
       stream: queue,
       onMessage,
-      next: typeof at === 'number' ? at : at === 'next' ? messages.length : 0,
+      next:
+        typeof at === 'number'
+          ? at
+          : at === 'next'
+            ? (this.broker.bases.get(queue) ?? 0) + messages.length
+            : 0,
     });
     return Promise.resolve({ consumerTag: tag });
   }

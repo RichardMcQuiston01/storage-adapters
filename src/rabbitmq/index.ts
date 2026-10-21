@@ -4,4 +4,5 @@ export type {
   RabbitMqAdapterOptions,
   RabbitMqChannelLike,
   RabbitMqMessageLike,
+  RabbitMqSnapshot,
 } from './rabbitmq.js';

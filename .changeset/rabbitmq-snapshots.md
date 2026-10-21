@@ -1,0 +1,5 @@
+---
+'@richardmcquiston01/storage-adapters': minor
+---
+
+Let the RabbitMQ adapter compact its stream. `compact()` (and the `snapshotIntervalMs` option, which calls it on a timer while there have been writes) publishes a snapshot: one message holding every entry with its revision. With a maximum age or size on the stream (the new `streamArguments` option), RabbitMQ can then delete the old messages, and a process that starts later builds its table from the oldest snapshot left plus the messages after it, so entries written only once survive and revisions keep working. If RabbitMQ has deleted the beginning and no usable snapshot is left, calls fail with `unavailable` instead of serving an incomplete table. A process whose channel was lost now reads the stream again from the front and tells subscribers what changed, instead of resuming at its last offset, because stream offsets are not contiguous. A 406 when declaring the stream now explains that every process needs the same `streamArguments`.
