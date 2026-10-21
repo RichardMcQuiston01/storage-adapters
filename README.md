@@ -673,10 +673,10 @@ following it. That makes it behave differently from the database adapters:
 - **Everything is in memory, and starting replays the whole stream.** Use it for settings
   and state, not documents or many large values. Keys can be up to 1024 bytes and values
   about 4 MB.
-- **The stream is never trimmed, so it grows with every write and removal.** Do not give
-  it a maximum age or size: RabbitMQ would delete the oldest messages, and with them any
-  entry that was not rewritten since. (Compacting it is up to you for now: copy the
-  current state into a new stream and switch over.)
+- **A stream left alone grows with every write and removal.** To keep it small, give it
+  a maximum age or size and have snapshots published well inside that limit (see
+  *Compaction* below). Starting reads the stream from the beginning, so the table is
+  only as quick to rebuild as the stream is short.
 - **Reads cost a round trip by default.** `get` and `list` put a small marker message
   through the stream first, so they see every write that finished before they were
   called, from any process; callers that arrive together share one marker. Pass
@@ -687,6 +687,44 @@ following it. That makes it behave differently from the database adapters:
   resumes where it stopped (with `retryMs`, while anyone is subscribed; otherwise on the
   next call). A queue that exists but is not a stream is reported, as RabbitMQ refuses to
   redeclare it.
+
+**Compaction.** RabbitMQ can only delete a stream from the front, in whole segments, once
+they pass a maximum age or size. That would silently lose any entry written only once, so
+the adapter writes *snapshots*: one message holding every entry, with its revision, as of a
+point in the stream. When RabbitMQ has deleted the beginning, a process that starts (or
+reconnects) builds its table from the oldest snapshot still there plus the messages after
+it, so nothing that matters is lost, and revisions keep working across the deletion.
+
+```ts
+const streamArguments = {
+  'x-max-age': '7D', // delete segments older than 7 days
+  'x-stream-max-segment-size-bytes': 5_000_000, // RabbitMQ deletes whole segments
+};
+const adapter = rabbitMqAdapter({
+  channel: () => connection.createConfirmChannel(),
+  toBuffer: (bytes) => Buffer.from(bytes),
+  streamArguments, // the same in every process: RabbitMQ refuses a different declaration
+  snapshotIntervalMs: 60 * 60 * 1000, // a snapshot after any hour that had writes
+});
+await adapter.compact(); // or publish one now
+```
+
+- **Keep snapshots well inside the limit.** Set `snapshotIntervalMs` (or call `compact`)
+  to a fraction of `x-max-age`, and make sure the stream's size limit leaves room for the
+  writes between snapshots plus the snapshot itself. If RabbitMQ deletes the stream's
+  beginning and no snapshot is left, a starting process refuses to serve a table it knows
+  is incomplete: calls fail with `unavailable`, saying the stream "holds no snapshot to
+  build the table from". Publishing one with `compact` fixes it.
+- A snapshot is one message, so the whole table must fit in about 8 MB (`compact` fails
+  with `invalid` beyond that). Several processes can publish snapshots; each skips the
+  ones whose writes another process has already covered.
+- `streamArguments` only applies when the adapter declares the stream, and RabbitMQ
+  refuses a declaration that differs from the existing stream, so pass the same
+  `streamArguments` everywhere, or `createStream: false` in the processes that rely on the
+  stream existing. For a stream that exists already, set a RabbitMQ policy instead.
+- When its channel is lost the adapter reads the stream again from the front (stream
+  offsets are not contiguous, so it cannot tell what was deleted while it was away) and
+  tells subscribers what differs.
 
 #### InfluxDB storage
 
@@ -1198,7 +1236,7 @@ Choose by how much data you have and who writes it:
 | `cassandraAdapter` | Values in a Cassandra cluster you already run | Lightweight transactions per write; `list` scans the table; `subscribe` sees other processes only with `pollIntervalMs` |
 | `neo4jAdapter` | Values in a Neo4j database you already run | One statement per call; `list` reads every matching key into memory; `subscribe` sees other processes only with `pollIntervalMs` |
 | `clickHouseAdapter` | Values in a ClickHouse server you already run | Best-effort: `ifRevision` is checked in one statement but not atomic across processes; rows are appended; `subscribe` sees other processes only with `pollIntervalMs` |
-| `rabbitMqAdapter` | Values kept as an append-only log in a RabbitMQ stream you already run | Atomic `ifRevision` (decided in log order); `subscribe` hears all processes; every entry is held in memory and the stream is replayed on start, so for settings and state |
+| `rabbitMqAdapter` | Values kept as an append-only log in a RabbitMQ stream you already run | Atomic `ifRevision` (decided in log order); `subscribe` hears all processes; every entry is held in memory and the stream is replayed on start (snapshots let RabbitMQ delete old messages), so for settings and state |
 | `influxDbAdapter` | Values in an InfluxDB 2.x bucket you already run | Best-effort: `ifRevision` is read-then-write, not atomic across processes; the bucket must keep data forever; `subscribe` sees other processes only with `pollIntervalMs` |
 | `rethinkDbAdapter` | Values in a RethinkDB you already run | One request per call; atomic `ifRevision`; `subscribe` hears other processes through a changefeed; keys at most 127 bytes |
 | `memcachedAdapter` | Cache-style values on a Memcached you already run | Keys can be evicted at any time; no `list`; `subscribe` sees only this adapter's writes |
