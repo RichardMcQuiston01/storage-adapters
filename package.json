@@ -74,6 +74,16 @@
         "default": "./dist/clickhouse.cjs"
       }
     },
+    "./rabbitmq": {
+      "import": {
+        "types": "./dist/rabbitmq.d.ts",
+        "default": "./dist/rabbitmq.js"
+      },
+      "require": {
+        "types": "./dist/rabbitmq.d.cts",
+        "default": "./dist/rabbitmq.cjs"
+      }
+    },
     "./influxdb": {
       "import": {
         "types": "./dist/influxdb.d.ts",
@@ -317,6 +327,9 @@
       "clickhouse": [
         "./dist/clickhouse.d.ts"
       ],
+      "rabbitmq": [
+        "./dist/rabbitmq.d.ts"
+      ],
       "influxdb": [
         "./dist/influxdb.d.ts"
       ],
@@ -431,9 +444,11 @@
     "@nats-io/kv": "^3.4.0",
     "@nats-io/transport-node": "^3.4.0",
     "@supabase/supabase-js": "^2.118.0",
+    "@types/amqplib": "^0.10.8",
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
+    "amqplib": "^2.2.0",
     "cassandra-driver": "^4.10.0",
     "eslint": "^10.12.0",
     "fake-indexeddb": "^6.2.5",
