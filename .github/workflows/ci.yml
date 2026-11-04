@@ -675,7 +675,9 @@ jobs:
   # laptop with the lockfile. One job per engine, and one engine failing does not stop
   # the others.
   browsers:
-    runs-on: ubuntu-latest
+    # Pinned: Playwright does not support the Ubuntu 26.04 image that ubuntu-latest
+    # now resolves to. Move back to ubuntu-latest once Playwright supports it.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
