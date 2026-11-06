@@ -247,6 +247,12 @@ export function rethinkDbAdapter(
   const where = `table "${dbName}.${tableName}"`;
   const listeners = createChangeListeners();
   const lastSeen = new Map<string, StoredValue | null>();
+  /**
+   * How many writes of this adapter are waiting for the server's answer. A write is
+   * confirmed after the server has applied it, so a read made meanwhile can already see
+   * its result; `catchUp` must not mistake that for what was stored before.
+   */
+  let writesInFlight = 0;
   const watches = new Map<string, Watching>();
   let ready: Promise<void> | null = null;
 
@@ -381,6 +387,11 @@ export function rethinkDbAdapter(
     const read = await readDoc(key);
     if (!read.ok || lastSeen.get(key) !== before) {
       return; // Unreadable, or the changefeed has delivered something newer meanwhile.
+    }
+    if (!restarted && !lastSeen.has(key) && writesInFlight > 0) {
+      // A write of ours is still unanswered, and the read may show its result. Do not
+      // record that as the starting point: the write's own announcement must still go out.
+      return;
     }
     const current: StoredValue | null =
       read.value === null
@@ -530,6 +541,7 @@ export function rethinkDbAdapter(
         created_at: now,
         updated_at: now,
       };
+      writesInFlight += 1;
       try {
         await prepare();
         const result: unknown = await table()
@@ -597,6 +609,8 @@ export function rethinkDbAdapter(
         return { ok: true, value: stored };
       } catch (error: unknown) {
         return failedWith(error, key, 'written', where);
+      } finally {
+        writesInFlight -= 1;
       }
     },
 
@@ -605,6 +619,7 @@ export function rethinkDbAdapter(
       if (refused !== null) {
         return refused;
       }
+      writesInFlight += 1;
       try {
         await prepare();
         const result: unknown = await table().get(key).delete().run(connection);
@@ -612,11 +627,13 @@ export function rethinkDbAdapter(
         if (problem !== null) {
           return failedWith(new Error(problem.text), key, 'removed', where);
         }
+        settle(key, null);
+        return { ok: true, value: null };
       } catch (error: unknown) {
         return failedWith(error, key, 'removed', where);
+      } finally {
+        writesInFlight -= 1;
       }
-      settle(key, null);
-      return { ok: true, value: null };
     },
 
     async list(keyPrefix, { signal }) {
