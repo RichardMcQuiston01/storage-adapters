@@ -1,6 +1,6 @@
 {
   "name": "@richardmcquiston01/storage-adapters",
-  "version": "0.23.0",
+  "version": "0.23.1",
   "description": "Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value contract with typed errors and revisions, composable wrappers (prefix, fallback, retry, cache, encoding), and a generic persistence helper with conflict handling. No I/O in the core.",
   "keywords": [
     "typescript",
@@ -18,7 +18,7 @@
   "author": "Richard McQuiston (https://richardmcquiston.com/)",
   "funding": {
     "type": "individual",
-    "url": "https://donate.stripe.com/00w5kD3Gj1Xo9v7gVOcs800"
+    "url": "https://ko-fi.com/P1V529Z7ZP"
   },
   "repository": {
     "type": "git",
