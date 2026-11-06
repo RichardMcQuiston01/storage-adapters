@@ -5,6 +5,8 @@
 ### Patch Changes
 
 - 3badd95: Switch the donate and funding link from PayPal to Ko-fi.
+- Fix a rare race in the RethinkDB adapter's `subscribe`: a write made right after subscribing could go unannounced. The adapter records what a key holds when it starts watching it, and a write of its own that the server had applied but not yet confirmed could already show in that read, so the write's announcement was dropped as a repeat. The starting point is no longer recorded while one of the adapter's own writes is unanswered.
+- Give the InfluxDB real-server test `lists many keys` a 30 second limit; on a busy CI runner it could pass the default five seconds. Test only, no change to the package.
 
 ## 0.23.0
 

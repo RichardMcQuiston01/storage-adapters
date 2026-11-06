@@ -191,6 +191,8 @@ export class FakeRethinkDb {
   beforeReplace: ((table: string, key: string) => void) | null = null;
   /** Milliseconds a write takes to answer, so feeds and writes can overlap. */
   writeLatencyMs = 0;
+  /** Milliseconds before a changefeed is registered, as when the server is slow to start it. */
+  feedStartLatencyMs = 0;
   private readonly feeds = new Set<Feed>();
 
   constructor(tables: readonly string[] = []) {
@@ -378,7 +380,14 @@ export class FakeRethinkDb {
           };
         }),
       changes: () =>
-        this.query(`${text}.changes()`, () => this.openFeed(table, key)),
+        this.query(`${text}.changes()`, async () => {
+          if (this.feedStartLatencyMs > 0) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, this.feedStartLatencyMs)
+            );
+          }
+          return this.openFeed(table, key);
+        }),
     };
   }
 

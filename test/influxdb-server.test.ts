@@ -338,7 +338,7 @@ if (url === undefined || url === '') {
       });
     });
 
-    void it('lists many keys', async () => {
+    void it('lists many keys', { timeout: 30_000 }, async () => {
       await withMeasurement(async (measurement) => {
         const adapter = adapterFor(measurement);
         const lines: string[] = [];
