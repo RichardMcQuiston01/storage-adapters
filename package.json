@@ -74,6 +74,16 @@
         "default": "./dist/clickhouse.cjs"
       }
     },
+    "./google-sheets": {
+      "import": {
+        "types": "./dist/google-sheets.d.ts",
+        "default": "./dist/google-sheets.js"
+      },
+      "require": {
+        "types": "./dist/google-sheets.d.cts",
+        "default": "./dist/google-sheets.cjs"
+      }
+    },
     "./rabbitmq": {
       "import": {
         "types": "./dist/rabbitmq.d.ts",
@@ -327,6 +337,9 @@
       "clickhouse": [
         "./dist/clickhouse.d.ts"
       ],
+      "google-sheets": [
+        "./dist/google-sheets.d.ts"
+      ],
       "rabbitmq": [
         "./dist/rabbitmq.d.ts"
       ],
@@ -440,6 +453,7 @@
     "@electric-sql/pglite": "^0.5.10",
     "@eslint/js": "^10.0.1",
     "@google-cloud/firestore": "^9.3.1",
+    "@googleapis/sheets": "^18.1.2",
     "@nats-io/jetstream": "^3.4.0",
     "@nats-io/kv": "^3.4.0",
     "@nats-io/transport-node": "^3.4.0",
