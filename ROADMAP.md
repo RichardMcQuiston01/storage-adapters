@@ -58,3 +58,21 @@
 
 - Switch `dashboard-widgets-toolkit` to depend on this package; it keeps
   re-exporting the wrappers so its public API and tests are unchanged.
+
+- Potential: a Google Sheets adapter (`/google-sheets`), for small settings
+  that people want to read and edit by hand. It would take an injected
+  `@googleapis/sheets` client and keep one row per key (`key`, `value`,
+  `revision`, `updated_at`). Sheets has no atomic conditional write, so
+  `ifRevision` would be best-effort, like ClickHouse and InfluxDB, and its
+  quotas (about 60 requests a minute per user, reads included) make it a poor
+  fit for frequent reads. Live testing needs a Google service account.
+  `error-log-adapter` has a Google Sheets package (on its `dev` branch, not
+  yet released) whose conventions to follow: `RAW` values, so text starting
+  with `=` is never run as a formula, a cell limit of 50,000 characters, and
+  error messages that explain 429, 403, 404 and a missing tab.
+
+- Potential: a Google Drive adapter (`/google-drive`), keeping entries as
+  files in a Drive folder through an injected Drive client. First check
+  whether the Drive API can make an update conditional on the file's current
+  version or ETag; without that, `ifRevision` would be best-effort. Needs a
+  service account or OAuth credentials to test live.
