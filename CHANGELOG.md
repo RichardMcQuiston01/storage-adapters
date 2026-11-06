@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.23.1
+
+### Patch Changes
+
+- 3badd95: Switch the donate and funding link from PayPal to Ko-fi.
+
 ## 0.23.0
 
 ### Minor Changes
