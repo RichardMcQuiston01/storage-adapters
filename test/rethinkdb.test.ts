@@ -656,6 +656,53 @@ void describe('rethinkDbAdapter: subscribe', () => {
     );
   });
 
+  void it('announces a write made right after subscribing, even if the changefeed starts late and a read overlaps the write', async () => {
+    const rethink = new FakeRethinkDb([TABLE]);
+    // The write is applied at once but confirmed late; the changefeed misses it, and the
+    // baseline read made meanwhile already shows its result.
+    rethink.writeLatencyMs = 80;
+    rethink.feedStartLatencyMs = 30;
+    const adapter = adapterFor(rethink, { createTable: false });
+    const seen: (StoredValue | null)[] = [];
+    const stop =
+      adapter.subscribe?.('k', (stored) => seen.push(stored)) ?? unsubscribed;
+    const written = expectOk(await adapter.set('k', 'dark', { signal }));
+    expectOk(await removeKey(adapter, 'k'));
+    await tick(50);
+    stop();
+    assert.deepEqual(seen, [written, null]);
+  });
+
+  void it('announces a removal made right after subscribing, under the same conditions', async () => {
+    const rethink = new FakeRethinkDb([TABLE]);
+    rethink.put(TABLE, { id: 'k', value: 'old', revision: 1 });
+    rethink.writeLatencyMs = 80;
+    rethink.feedStartLatencyMs = 30;
+    const adapter = adapterFor(rethink, { createTable: false });
+    const seen: (StoredValue | null)[] = [];
+    const stop =
+      adapter.subscribe?.('k', (stored) => seen.push(stored)) ?? unsubscribed;
+    expectOk(await removeKey(adapter, 'k'));
+    await tick(50);
+    stop();
+    assert.deepEqual(seen, [null]);
+  });
+
+  void it('still records where a key stands when no write of its own overlaps the baseline read', async () => {
+    const rethink = new FakeRethinkDb([TABLE]);
+    rethink.put(TABLE, { id: 'k', value: 'old', revision: 1 });
+    const adapter = adapterFor(rethink, { createTable: false });
+    const seen: (StoredValue | null)[] = [];
+    const stop =
+      adapter.subscribe?.('k', (stored) => seen.push(stored)) ?? unsubscribed;
+    await tick(60);
+    // The same value written again is not news: the baseline says it is already known.
+    rethink.put(TABLE, { id: 'k', value: 'old', revision: 1 });
+    await tick(60);
+    stop();
+    assert.deepEqual(seen, []);
+  });
+
   void it('shares one changefeed among the subscribers of a key, and closes it with the last', async () => {
     const rethink = new FakeRethinkDb([TABLE]);
     const adapter = adapterFor(rethink, { createTable: false });
