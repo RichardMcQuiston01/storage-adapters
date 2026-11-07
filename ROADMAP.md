@@ -53,6 +53,8 @@
 - **0.23.0**: `compact()` and `snapshotIntervalMs` for the RabbitMQ stream.
 - **0.23.1**: the donate link moved to Ko-fi; a fix for a rare RethinkDB
   `subscribe` race; browser CI pinned to `ubuntu-24.04`.
+- **0.24.0**: the `/google-sheets` entry point with `googleSheetsAdapter()` (best-effort
+  `ifRevision`; tested against a stand-in for the Sheets API).
 - `dashboard-widgets-toolkit` 0.36.0 depends on this package and re-exports the
   wrappers, so its public API is unchanged.
 
@@ -86,9 +88,9 @@
   `If-Match` (needs an account). Tested so far: Amazon S3's documented
   behaviour (`moto`), MinIO (in CI) and DigitalOcean Spaces (by hand).
 
-- The Google Sheets adapter (`/google-sheets`) is built and waiting for a release. It has been
-  tested against a stand-in for the Sheets API only: run `test/google-sheets-live.test.ts`
-  against a real spreadsheet (needs a Google service account) before relying on it.
+- Run `test/google-sheets-live.test.ts` against a real spreadsheet (needs a Google
+  service account). The Google Sheets adapter has only been tested against a stand-in for
+  the Sheets API so far.
 
 ## Potential
 
