@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.24.0
+
+### Minor Changes
+
+- b634a84: Add the `/google-sheets` entry point with `googleSheetsAdapter()`, a best-effort adapter that keeps one row per key in a tab of a Google Sheets spreadsheet, so small settings can be read and edited by hand. It takes a Sheets client (the one from `@googleapis/sheets` fits), writes the column names into row 1, and sends every value as `RAW` so text starting with `=` is never run as a formula. Sheets has no conditional write, so `ifRevision` is checked by reading then writing and is not atomic across processes; creating a key is checked by reading it back, and the first row wins. `remove` marks the row deleted so rows never move, and a key or value longer than a cell holds (50,000 characters) is refused. Errors explain 429, 403, 404 and a missing tab. `subscribe` hears other writers with `pollIntervalMs`. Tested against a stand-in for the Sheets API; a test against a real spreadsheet is included but skipped unless `TEST_GOOGLE_SHEETS_ID` is set.
+
 ## 0.23.1
 
 ### Patch Changes
