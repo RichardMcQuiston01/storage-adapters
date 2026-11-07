@@ -30,6 +30,33 @@
 - **0.12.0**: the `/supabase` entry point with `supabaseAdapter()` and
   `supabaseSetupSql()` (tested against PostgreSQL and PostgREST through the
   real `supabase-js` in CI; Realtime covered with a fake channel).
+- **0.13.0**: the `/firebase/realtime` entry point with
+  `realtimeDatabaseAdapter()` for the Firebase Realtime Database.
+- **0.14.0**: `postgresAdapter` hears other processes' writes through
+  `LISTEN`/`NOTIFY` (the `listener` option).
+- **0.15.0**: `yamlFileAdapter` keeps comments, key order and blank lines; the
+  `/react` entry point with the `useStoredValue` hook.
+- **0.16.0**: `mysqlAdapter` polling (`pollIntervalMs`); the public surface
+  trimmed for 1.0 (`utf8Length` and a few helpers are no longer exported);
+  `funding` link in `package.json`.
+- **0.17.0**: the `/nats` entry point with `natsKvAdapter()` and the `/couchdb`
+  entry point with `couchDbAdapter()`.
+- **0.18.0**: the `/memcached` entry point with `memcachedAdapter()`.
+- **0.19.0**: the `/arangodb` and `/cassandra` entry points with
+  `arangoDbAdapter()` and `cassandraAdapter()`.
+- **0.20.0**: the `/neo4j`, `/influxdb` and `/rethinkdb` entry points with
+  `neo4jAdapter()`, `influxDbAdapter()` and `rethinkDbAdapter()`.
+- **0.21.0**: the `/clickhouse` entry point with `clickHouseAdapter()`
+  (best-effort `ifRevision`).
+- **0.22.0**: the `/rabbitmq` entry point with `rabbitMqAdapter()`, an
+  append-only log in a RabbitMQ stream.
+- **0.23.0**: `compact()` and `snapshotIntervalMs` for the RabbitMQ stream.
+- **0.23.1**: the donate link moved to Ko-fi; a fix for a rare RethinkDB
+  `subscribe` race; browser CI pinned to `ubuntu-24.04`.
+- **0.24.0**: the `/google-sheets` entry point with `googleSheetsAdapter()` (best-effort
+  `ifRevision`; tested against a stand-in for the Sheets API).
+- `dashboard-widgets-toolkit` 0.36.0 depends on this package and re-exports the
+  wrappers, so its public API is unchanged.
 
 ## Ground rules for every new adapter
 
@@ -39,12 +66,17 @@
 - Same contract as `localStorageAdapter()`: every operation returns a
   `StoreResult`, nothing throws, error messages name the key, and an aborted
   `signal` returns `unavailable` without touching the backend.
-- Revisions are counters kept as strings. `set` with `ifRevision` returns
-  `conflict` when the stored revision differs, and the check and write are
-  atomic wherever the backend allows it.
+- Revisions are strings. Most adapters keep a counter; where the backend has its
+  own version token (an ETag, `_rev`, a stream offset) the adapter uses that.
+  `set` with `ifRevision` returns `conflict` when the stored revision differs
+  (a key with nothing stored is created), and the check and write are atomic
+  wherever the backend allows it. Where it does not (ClickHouse, InfluxDB), the
+  adapter says so in its README.
 - Drivers are optional peer dependencies, never bundled. Importing a subpath
   without its driver installed returns an `unavailable` result, not a crash.
-- Tests use `node:test` and run offline against fakes or local files.
+- Tests use `node:test` and run offline against fakes or local files. An
+  adapter for a server also gets a real-server test (skipped unless its
+  `TEST_*_URL` is set) and a CI job that runs it.
 - Each adapter ships with a changeset (minor), README usage and a matching
   entry here.
 - Each adapter is added to `test/conformance.test.ts`, which runs the shared
@@ -56,23 +88,35 @@
   `If-Match` (needs an account). Tested so far: Amazon S3's documented
   behaviour (`moto`), MinIO (in CI) and DigitalOcean Spaces (by hand).
 
-- Switch `dashboard-widgets-toolkit` to depend on this package; it keeps
-  re-exporting the wrappers so its public API and tests are unchanged.
+- Run `test/google-sheets-live.test.ts` against a real spreadsheet (needs a Google
+  service account). The Google Sheets adapter has only been tested against a stand-in for
+  the Sheets API so far.
 
-- Potential: a Google Sheets adapter (`/google-sheets`), for small settings
-  that people want to read and edit by hand. It would take an injected
-  `@googleapis/sheets` client and keep one row per key (`key`, `value`,
-  `revision`, `updated_at`). Sheets has no atomic conditional write, so
-  `ifRevision` would be best-effort, like ClickHouse and InfluxDB, and its
-  quotas (about 60 requests a minute per user, reads included) make it a poor
-  fit for frequent reads. Live testing needs a Google service account.
-  `error-log-adapter` has a Google Sheets package (on its `dev` branch, not
-  yet released) whose conventions to follow: `RAW` values, so text starting
-  with `=` is never run as a formula, a cell limit of 50,000 characters, and
-  error messages that explain 429, 403, 404 and a missing tab.
+## Potential
 
-- Potential: a Google Drive adapter (`/google-drive`), keeping entries as
-  files in a Drive folder through an injected Drive client. First check
-  whether the Drive API can make an update conditional on the file's current
-  version or ETag; without that, `ifRevision` would be best-effort. Needs a
-  service account or OAuth credentials to test live.
+Ideas, in no order. Nothing here is built or promised.
+
+- A Google Drive adapter (`/google-drive`), keeping entries as files in a Drive
+  folder through an injected Drive client. First check whether the Drive API
+  can make an update conditional on the file's current version or ETag;
+  without that, `ifRevision` would be best-effort. Needs a service account or
+  OAuth credentials to test live.
+
+- Google Cloud Storage (`/gcs`) and Azure Blob Storage (`/azure-blob`), the
+  object-store siblings of `/s3`. Both have conditional writes (`ifGenerationMatch`
+  on GCS, `If-Match` on Azure), so `ifRevision` could be atomic. Each would take
+  an injected client and need a real account (or an emulator such as
+  `fake-gcs-server` or Azurite) for a CI job.
+
+- Amazon DynamoDB (`/dynamodb`), through an injected document client. Conditional
+  expressions give an atomic `ifRevision`. DynamoDB Local would serve the CI job.
+
+## Not planned
+
+- **Slack and Google Chat webhooks.** Issue #130 asked about them as places to
+  send error data. They are write-only notification sinks: there is nothing to
+  read back, so they cannot be a `StorageAdapter`. Posting to one is a job for
+  `error-log-adapter`'s webhook adapter, or for `restAdapter` plus a wrapper in
+  consumer code.
+- **OrientDB.** `error-log-adapter` decided not to plan it, and the same applies
+  here.

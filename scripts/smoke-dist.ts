@@ -26,6 +26,7 @@ import * as mysql from '../dist/mysql.js';
 import * as postgres from '../dist/postgres.js';
 import * as react from '../dist/react.js';
 import * as clickhouse from '../dist/clickhouse.js';
+import * as googleSheets from '../dist/google-sheets.js';
 import * as rabbitmq from '../dist/rabbitmq.js';
 import * as influxdb from '../dist/influxdb.js';
 import * as memcached from '../dist/memcached.js';
@@ -56,6 +57,7 @@ const entries: Record<string, Record<string, unknown>> = {
   postgres,
   react,
   clickhouse,
+  googleSheets,
   rabbitmq,
   influxdb,
   memcached,
