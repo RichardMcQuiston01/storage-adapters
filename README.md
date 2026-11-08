@@ -698,9 +698,14 @@ and Sheets is a shared notebook, not a database:
   holds; a longer one is `invalid`, and nothing is sent. An empty key is `invalid`.
 - `subscribe` reports this adapter's own writes. Pass `pollIntervalMs` (at least 50, but
   use several seconds) to also hear changes made by others; each look is one read.
-- The adapter has been tested against a stand-in for the Sheets API. A test that runs it
-  against a real spreadsheet is in `test/google-sheets-live.test.ts`; it is skipped
-  unless you set `TEST_GOOGLE_SHEETS_ID` (see the file for how to run it).
+- The full adapter test suite passes against a real Google spreadsheet (tested November
+  2026, through `@googleapis/sheets` and a service account), as well as against a stand-in
+  for the Sheets API in the default test run. To run it against your own spreadsheet, set
+  `TEST_GOOGLE_SHEETS_ID` and `GOOGLE_APPLICATION_CREDENTIALS` and run
+  `test/google-sheets-live.test.ts` (see the file for how). Expect it to take several
+  minutes, because it keeps under Sheets' request quota. If every call fails with a 403
+  that says the API "has not been used in project ... or it is disabled", enable the
+  Google Sheets API in the project that owns the service account.
 
 #### RabbitMQ storage
 
