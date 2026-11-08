@@ -84,10 +84,6 @@
 
 ## Later
 
-- Try `s3Adapter` against Cloudflare R2 and note whether it enforces
-  `If-Match` (needs an account). Tested so far: Amazon S3's documented
-  behaviour (`moto`), MinIO (in CI) and DigitalOcean Spaces (by hand).
-
 - Run `test/google-sheets-live.test.ts` against a real spreadsheet (needs a Google
   service account). The Google Sheets adapter has only been tested against a stand-in for
   the Sheets API so far.

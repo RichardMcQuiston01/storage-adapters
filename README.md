@@ -1148,7 +1148,8 @@ Observed so far: Amazon S3's documented behaviour (through the `moto` emulator) 
 MinIO (built from source, February 2026) enforces `If-Match` and `If-None-Match` with 412, and answers 404 for `If-Match` on a missing object; the whole suite passes against it in CI.
 DigitalOcean Spaces (tested on `sfo3`, October 2026) refuses a quoted ETag in
 `If-Match` but accepts it without quotes, and answers 412 rather than 404 for a missing
-object; the adapter works out both by itself, so `ifRevision` works there. Run the check below to see how your own service behaves.
+object; the adapter works out both by itself, so `ifRevision` works there.
+Cloudflare R2 (tested November 2026) passes the whole suite, including the `ifRevision` and `list` tests, so `ifRevision` works there. Use the account's endpoint without the bucket name (`https://<account id>.r2.cloudflarestorage.com`, with `forcePathStyle: true` and region `auto`): an endpoint that ends in the bucket name still reads and writes, but then `list` looks under the wrong prefix and finds nothing. Run the check below to see how your own service behaves.
 
 To see how a particular service behaves before you rely on it, run the check from a
 clone of this repository. It tries each conditional write step by step against your
