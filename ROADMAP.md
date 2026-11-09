@@ -55,6 +55,9 @@
   `subscribe` race; browser CI pinned to `ubuntu-24.04`.
 - **0.24.0**: the `/google-sheets` entry point with `googleSheetsAdapter()` (best-effort
   `ifRevision`; the suite passes against a real Google spreadsheet).
+- **0.24.1**: a clearer Google Sheets error when the Sheets API is not enabled for the
+  credentials' project; the README records that `s3Adapter` passes against Cloudflare R2
+  and the Google Sheets adapter passes against a real spreadsheet.
 - `dashboard-widgets-toolkit` 0.36.0 depends on this package and re-exports the
   wrappers, so its public API is unchanged.
 
