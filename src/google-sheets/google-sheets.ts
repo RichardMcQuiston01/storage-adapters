@@ -214,6 +214,19 @@ function describeFailure(
         detail: `${message} (the client's credentials were not accepted: check the service account key or token)`,
       };
     case 403:
+      if (
+        /has not been used in project|is disabled|SERVICE_DISABLED/i.test(
+          message
+        )
+      ) {
+        const project: string =
+          /\bproject (\S+) before\b/i.exec(message)?.[1] ??
+          'that owns the credentials';
+        return {
+          code: 'forbidden',
+          detail: `the Google Sheets API is not enabled for Google Cloud project ${project}: open https://console.cloud.google.com/apis/library/sheets.googleapis.com in that project, click Enable, wait a few minutes, then try again (the project is the one that owns the service account or credentials the client uses; Google said: ${message})`,
+        };
+      }
       return /quota|rate limit/i.test(message)
         ? {
             code: 'unavailable',
@@ -221,7 +234,7 @@ function describeFailure(
           }
         : {
             code: 'forbidden',
-            detail: `${message} (the account the client signs in as cannot edit this spreadsheet: share it with that account, a service account's email address, as an Editor, and make sure the Google Sheets API is enabled for the project)`,
+            detail: `${message} (the account the client signs in as cannot edit this spreadsheet: share it with that account, a service account's email address, as an Editor)`,
           };
     case 404:
       return {
