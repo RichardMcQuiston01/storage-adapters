@@ -427,6 +427,25 @@ void describe('googleSheetsAdapter', () => {
         /share it with that account.*as an Editor/
       );
       sheets.failures.push(
+        new FakeSheetsError(
+          'Google Sheets API has not been used in project 118565593530 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/sheets.googleapis.com/overview?project=118565593530 then retry. If you enabled this API recently, wait a few minutes for the action to propagate to our systems and retry.',
+          403
+        )
+      );
+      const disabled: string = expectFailure(
+        await adapter.get('k', { signal }),
+        'forbidden',
+        'k'
+      );
+      assert.match(
+        disabled,
+        /Sheets API is not enabled for Google Cloud project 118565593530.*click Enable.*owns the service account/
+      );
+      assert.ok(
+        !/share it with that account/.test(disabled),
+        'the sharing hint is for permission errors, not this one'
+      );
+      sheets.failures.push(
         new FakeSheetsError('Requested entity was not found.', 404)
       );
       assert.match(
