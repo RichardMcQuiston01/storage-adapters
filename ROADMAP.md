@@ -58,6 +58,8 @@
 - **0.24.1**: a clearer Google Sheets error when the Sheets API is not enabled for the
   credentials' project; the README records that `s3Adapter` passes against Cloudflare R2
   and the Google Sheets adapter passes against a real spreadsheet.
+- **0.25.0**: the `/google-drive` entry point with `googleDriveAdapter()` (best-effort
+  `ifRevision`; tested against a stand-in for the Drive API).
 - `dashboard-widgets-toolkit` 0.36.0 depends on this package and re-exports the
   wrappers, so its public API is unchanged.
 
@@ -87,8 +89,8 @@
 
 ## Later
 
-- The Google Drive adapter (`/google-drive`) is built and waiting for a release. It has been
-  tested against a stand-in for the Drive API only: run `test/google-drive-live.test.ts` against
+- The Google Drive adapter (`/google-drive`) has been tested against a stand-in for
+  the Drive API only: run `test/google-drive-live.test.ts` against
   a real Drive folder (it needs credentials with a Drive scope; see the file) before relying on it.
   I could not check Google's documentation for a conditional-update precondition, so `ifRevision`
   is best-effort, and `sharedDrive: true` is untested.
