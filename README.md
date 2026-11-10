@@ -638,6 +638,74 @@ made through the same adapter unless you ask for polling (`pollIntervalMs`, at l
 with `onPollError`), which reads the subscribed keys once per interval; with nothing
 subscribed there is no query and no timer.
 
+#### Google Drive storage
+
+To keep entries as files in a Google Drive folder, use `googleDriveAdapter` from the optional
+`/google-drive` entry point. It imports nothing: you pass in a Google Drive client (the one
+from `@googleapis/drive`, or `googleapis`, fits as it is). Each key is a plain-text file named
+after the key, holding the value, so people can open the files in Drive, read them, and change
+a value by hand.
+
+```ts
+import { auth, drive } from '@googleapis/drive';
+import { googleDriveAdapter } from '@richardmcquiston01/storage-adapters/google-drive';
+
+const adapter: StorageAdapter = googleDriveAdapter({
+  client: drive({
+    version: 'v3',
+    auth: new auth.GoogleAuth({
+      scopes: ['https://www.googleapis.com/auth/drive'],
+    }),
+  }),
+  folderId: process.env.SETTINGS_FOLDER_ID ?? '', // the part of the folder URL after /folders/
+  // sharedDrive: true,                           // when the folder is in a shared drive
+});
+```
+
+Set up once: turn on the **Google Drive API** in a Google Cloud project, create the credentials
+(see the next paragraph), make a folder for the adapter's files, and **share it** with the
+account the client signs in as (an Editor). Use a folder of its own, because the adapter lists
+every file in it.
+
+**Which credentials.** Files are owned by the account that creates them, and a **service
+account has no Drive storage of its own**, so a service account can only use a folder in a
+**shared drive** (a Google Workspace feature): pass `sharedDrive: true`. On a personal Google
+account, sign in as a user instead (OAuth with a refresh token, for example an
+`authorized_user` credentials file). The adapter reports a missing quota as `quota` and says
+this.
+
+**This adapter is best-effort**, and Drive is a file store, not a database:
+
+- Drive has no conditional write. `set` reads the file's revision, compares it with
+  `ifRevision`, then writes the file; two writers that update the same key within the moment
+  between those two requests can both be told they succeeded, and the later write wins.
+  Creating a key is safer: Drive lets two files share a name, so after creating one the
+  adapter lists the folder, and if an older file for that key exists it deletes its own and
+  returns `conflict`. Drive's listings can lag behind recent changes, so a very close race can
+  slip through. Writers that share one adapter object take turns, so for them the check
+  holds. If you need the guarantee across processes, use a store with a compare-and-set, such
+  as PostgreSQL, Redis, Cassandra or Neo4j.
+- The revision is a counter kept in the file's private properties (`appProperties`). A value
+  you change by hand in Drive does not change it, so `ifRevision` does not notice that. A file
+  with no whole-number revision makes that key `corrupt` until you delete it.
+- Requests: `get` takes two (the file's properties, then its content), `set` two or three,
+  `remove` one or two. The adapter remembers each key's file, so repeat requests do not search
+  by name. `list` pages through the folder and reads only names, and may lag a few seconds
+  behind recent writes.
+- `remove` deletes the file permanently. A key written again starts at revision 1. Two files
+  with the same name (made by hand, or by a close race) are treated as one key, and the oldest
+  wins.
+- A key can be up to 255 characters, with no leading or trailing space, because it is a file
+  name. A value can be up to about 5 MB of UTF-8 text. A larger one is `invalid`, and nothing
+  is sent.
+- `subscribe` reports this adapter's own writes. Pass `pollIntervalMs` (at least 50, but use
+  several seconds) to also hear changes made by others; each look lists the folder and reads
+  the content of any key whose revision changed.
+- `sharedDrive: true` is not yet tested against a real shared drive.
+- The adapter has been tested against a stand-in for the Drive API only. A test that runs it
+  against a real Drive folder is in `test/google-drive-live.test.ts`; it is skipped unless you
+  set `TEST_GOOGLE_DRIVE_FOLDER_ID` (see the file for how to run it).
+
 #### Google Sheets storage
 
 For small settings that people want to read and edit by hand, use `googleSheetsAdapter` from
@@ -1307,6 +1375,7 @@ Choose by how much data you have and who writes it:
 | `neo4jAdapter` | Values in a Neo4j database you already run | One statement per call; `list` reads every matching key into memory; `subscribe` sees other processes only with `pollIntervalMs` |
 | `clickHouseAdapter` | Values in a ClickHouse server you already run | Best-effort: `ifRevision` is checked in one statement but not atomic across processes; rows are appended; `subscribe` sees other processes only with `pollIntervalMs` |
 | `googleSheetsAdapter` | Small settings in a Google Sheets tab that people can read and edit by hand | Best-effort: `ifRevision` is checked by reading then writing, not atomically; about 60 requests a minute; `subscribe` sees others only with `pollIntervalMs` |
+| `googleDriveAdapter` | Small settings as text files in a Google Drive folder that people can open and edit by hand | Best-effort: `ifRevision` is checked by reading then writing, not atomically; listings can lag; a service account needs a shared drive; `subscribe` sees others only with `pollIntervalMs` |
 | `rabbitMqAdapter` | Values kept as an append-only log in a RabbitMQ stream you already run | Atomic `ifRevision` (decided in log order); `subscribe` hears all processes; every entry is held in memory and the stream is replayed on start (snapshots let RabbitMQ delete old messages), so for settings and state |
 | `influxDbAdapter` | Values in an InfluxDB 2.x bucket you already run | Best-effort: `ifRevision` is read-then-write, not atomic across processes; the bucket must keep data forever; `subscribe` sees other processes only with `pollIntervalMs` |
 | `rethinkDbAdapter` | Values in a RethinkDB you already run | One request per call; atomic `ifRevision`; `subscribe` hears other processes through a changefeed; keys at most 127 bytes |
@@ -1505,7 +1574,7 @@ either **Stable** or **Experimental**:
 
 ### Examples
 
-See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/browser-real.test.ts` for the browser adapters in a real Chromium, Firefox or WebKit (run `bun run test:browser`, with `TEST_BROWSER=firefox` or `webkit` for the others), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/rethinkdb.test.ts` and `test/rethinkdb-server.test.ts` for the RethinkDB adapter (set `TEST_RETHINKDB_HOST`, and `TEST_RETHINKDB_PORT`, `TEST_RETHINKDB_USER` and `TEST_RETHINKDB_PASSWORD` if needed, to also run it against a real server), `test/google-sheets.test.ts` and `test/google-sheets-live.test.ts` for the Google Sheets adapter (set `TEST_GOOGLE_SHEETS_ID` and `GOOGLE_APPLICATION_CREDENTIALS` to also run it against a real spreadsheet), `test/clickhouse.test.ts` and `test/clickhouse-server.test.ts` for the ClickHouse adapter (set `TEST_CLICKHOUSE_URL`, for example `http://127.0.0.1:8123`, and `TEST_CLICKHOUSE_USER` and `TEST_CLICKHOUSE_PASSWORD` if it needs a login, to also run it against a real server), `test/rabbitmq.test.ts` and `test/rabbitmq-server.test.ts` for the RabbitMQ adapter (set `TEST_RABBITMQ_URL`, for example `amqp://guest:guest@127.0.0.1:5672`, to also run it against a real broker), `test/influxdb.test.ts` and `test/influxdb-server.test.ts` for the InfluxDB adapter (set `TEST_INFLUXDB_URL`, `TEST_INFLUXDB_ORG`, `TEST_INFLUXDB_BUCKET` and `TEST_INFLUXDB_TOKEN` to also run it against a real server), `test/neo4j.test.ts` and `test/neo4j-server.test.ts` for the Neo4j adapter (set `TEST_NEO4J_URL`, for example `bolt://127.0.0.1:7687`, and `TEST_NEO4J_USER` and `TEST_NEO4J_PASSWORD` if it needs a login, to also run it against a real server), `test/cassandra.test.ts` and `test/cassandra-server.test.ts` for the Cassandra adapter (set `TEST_CASSANDRA_CONTACT_POINT`, and `TEST_CASSANDRA_DATACENTER` if it is not `datacenter1`, to also run it against a real node), `test/arangodb.test.ts` and `test/arangodb-server.test.ts` for the ArangoDB adapter (set `TEST_ARANGODB_URL`, and `TEST_ARANGODB_USER` and `TEST_ARANGODB_PASSWORD` if it needs a login, to also run it against a real server), `test/memcached.test.ts` and `test/memcached-server.test.ts` for the Memcached adapter (set `TEST_MEMCACHED_SERVER`, for example `127.0.0.1:11211`, to also run it against a real server), `test/couchdb.test.ts` and `test/couchdb-server.test.ts` for the CouchDB adapter (set `TEST_COUCHDB_URL`, and `TEST_COUCHDB_USER` and `TEST_COUCHDB_PASSWORD` if it needs a login, to also run it against a real server), `test/nats.test.ts` and `test/nats-server.test.ts` for the NATS KV adapter (set `TEST_NATS_URL`, for example `nats://127.0.0.1:4222` for a server started with `-js`, to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
+See `test/adapters.test.ts` for each wrapper in use, `test/browser.test.ts` for the browser adapters (localStorage and sessionStorage), `test/indexeddb.test.ts` for the IndexedDB adapter `test/sqlite.test.ts` for the SQLite adapter, `test/postgres.test.ts`, `test/mysql.test.ts` and `test/databases.test.ts` for the PostgreSQL and MySQL adapters (set `TEST_POSTGRES_URL` and `TEST_MYSQL_URL` to also run them against real servers), `test/rest.test.ts` for the REST adapter, `test/redis.test.ts` for the Redis adapter (set `TEST_REDIS_URL` to also run it against a real server), `test/browser-real.test.ts` for the browser adapters in a real Chromium, Firefox or WebKit (run `bun run test:browser`, with `TEST_BROWSER=firefox` or `webkit` for the others), `test/supabase.test.ts` and `test/supabase-postgrest.test.ts` for the Supabase adapter (set `TEST_SUPABASE_DB_URL`, `TEST_SUPABASE_REST_URL` and `TEST_SUPABASE_JWT_SECRET` to also run it against PostgreSQL and PostgREST through the real `supabase-js`), `test/firestore.test.ts` and `test/firestore-emulator.test.ts` for the Firestore adapter (set `TEST_FIRESTORE_EMULATOR`, for example `127.0.0.1:8080`, to also run it against the Firestore emulator through both SDKs), `test/rethinkdb.test.ts` and `test/rethinkdb-server.test.ts` for the RethinkDB adapter (set `TEST_RETHINKDB_HOST`, and `TEST_RETHINKDB_PORT`, `TEST_RETHINKDB_USER` and `TEST_RETHINKDB_PASSWORD` if needed, to also run it against a real server), `test/google-drive.test.ts` and `test/google-drive-live.test.ts` for the Google Drive adapter (set `TEST_GOOGLE_DRIVE_FOLDER_ID` and `GOOGLE_APPLICATION_CREDENTIALS` to also run it against a real folder), `test/google-sheets.test.ts` and `test/google-sheets-live.test.ts` for the Google Sheets adapter (set `TEST_GOOGLE_SHEETS_ID` and `GOOGLE_APPLICATION_CREDENTIALS` to also run it against a real spreadsheet), `test/clickhouse.test.ts` and `test/clickhouse-server.test.ts` for the ClickHouse adapter (set `TEST_CLICKHOUSE_URL`, for example `http://127.0.0.1:8123`, and `TEST_CLICKHOUSE_USER` and `TEST_CLICKHOUSE_PASSWORD` if it needs a login, to also run it against a real server), `test/rabbitmq.test.ts` and `test/rabbitmq-server.test.ts` for the RabbitMQ adapter (set `TEST_RABBITMQ_URL`, for example `amqp://guest:guest@127.0.0.1:5672`, to also run it against a real broker), `test/influxdb.test.ts` and `test/influxdb-server.test.ts` for the InfluxDB adapter (set `TEST_INFLUXDB_URL`, `TEST_INFLUXDB_ORG`, `TEST_INFLUXDB_BUCKET` and `TEST_INFLUXDB_TOKEN` to also run it against a real server), `test/neo4j.test.ts` and `test/neo4j-server.test.ts` for the Neo4j adapter (set `TEST_NEO4J_URL`, for example `bolt://127.0.0.1:7687`, and `TEST_NEO4J_USER` and `TEST_NEO4J_PASSWORD` if it needs a login, to also run it against a real server), `test/cassandra.test.ts` and `test/cassandra-server.test.ts` for the Cassandra adapter (set `TEST_CASSANDRA_CONTACT_POINT`, and `TEST_CASSANDRA_DATACENTER` if it is not `datacenter1`, to also run it against a real node), `test/arangodb.test.ts` and `test/arangodb-server.test.ts` for the ArangoDB adapter (set `TEST_ARANGODB_URL`, and `TEST_ARANGODB_USER` and `TEST_ARANGODB_PASSWORD` if it needs a login, to also run it against a real server), `test/memcached.test.ts` and `test/memcached-server.test.ts` for the Memcached adapter (set `TEST_MEMCACHED_SERVER`, for example `127.0.0.1:11211`, to also run it against a real server), `test/couchdb.test.ts` and `test/couchdb-server.test.ts` for the CouchDB adapter (set `TEST_COUCHDB_URL`, and `TEST_COUCHDB_USER` and `TEST_COUCHDB_PASSWORD` if it needs a login, to also run it against a real server), `test/nats.test.ts` and `test/nats-server.test.ts` for the NATS KV adapter (set `TEST_NATS_URL`, for example `nats://127.0.0.1:4222` for a server started with `-js`, to also run it against a real server), `test/s3.test.ts` and `test/s3-server.test.ts` for the S3 adapter (set `TEST_S3_ENDPOINT`, `TEST_S3_BUCKET` and the two key variables to also run it against an S3-compatible server) and `test/file.test.ts` for the file adapter `test/json-file.test.ts` for the JSON file adapter and `test/yaml-ini-file.test.ts` for the YAML and INI adapters.
 
 [Back to Top](#table-of-contents)
 
