@@ -698,9 +698,14 @@ and Sheets is a shared notebook, not a database:
   holds; a longer one is `invalid`, and nothing is sent. An empty key is `invalid`.
 - `subscribe` reports this adapter's own writes. Pass `pollIntervalMs` (at least 50, but
   use several seconds) to also hear changes made by others; each look is one read.
-- The adapter has been tested against a stand-in for the Sheets API. A test that runs it
-  against a real spreadsheet is in `test/google-sheets-live.test.ts`; it is skipped
-  unless you set `TEST_GOOGLE_SHEETS_ID` (see the file for how to run it).
+- The full adapter test suite passes against a real Google spreadsheet (tested November
+  2026, through `@googleapis/sheets` and a service account), as well as against a stand-in
+  for the Sheets API in the default test run. To run it against your own spreadsheet, set
+  `TEST_GOOGLE_SHEETS_ID` and `GOOGLE_APPLICATION_CREDENTIALS` and run
+  `test/google-sheets-live.test.ts` (see the file for how). Expect it to take several
+  minutes, because it keeps under Sheets' request quota. If every call fails with a 403
+  that says the API "has not been used in project ... or it is disabled", enable the
+  Google Sheets API in the project that owns the service account.
 
 #### RabbitMQ storage
 
@@ -1148,7 +1153,8 @@ Observed so far: Amazon S3's documented behaviour (through the `moto` emulator) 
 MinIO (built from source, February 2026) enforces `If-Match` and `If-None-Match` with 412, and answers 404 for `If-Match` on a missing object; the whole suite passes against it in CI.
 DigitalOcean Spaces (tested on `sfo3`, October 2026) refuses a quoted ETag in
 `If-Match` but accepts it without quotes, and answers 412 rather than 404 for a missing
-object; the adapter works out both by itself, so `ifRevision` works there. Run the check below to see how your own service behaves.
+object; the adapter works out both by itself, so `ifRevision` works there.
+Cloudflare R2 (tested November 2026) passes the whole suite, including the `ifRevision` and `list` tests, so `ifRevision` works there. Use the account's endpoint without the bucket name (`https://<account id>.r2.cloudflarestorage.com`, with `forcePathStyle: true` and region `auto`): an endpoint that ends in the bucket name still reads and writes, but then `list` looks under the wrong prefix and finds nothing. Run the check below to see how your own service behaves.
 
 To see how a particular service behaves before you rely on it, run the check from a
 clone of this repository. It tries each conditional write step by step against your

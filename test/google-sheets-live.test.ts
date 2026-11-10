@@ -13,8 +13,11 @@
  *
  *   bun test --timeout 600000 test/google-sheets-live.test.ts
  *
- * Nothing here has been run against a real spreadsheet by the author of the adapter yet;
- * the default test run uses the stand-in in test/support/fake-google-sheets.ts.
+ * This passed against a real spreadsheet in November 2026. The default test run uses the
+ * stand-in in test/support/fake-google-sheets.ts instead.
+ *
+ * If every call fails with a 403 saying the API "has not been used in project ... or it
+ * is disabled", enable the Google Sheets API in the project that owns the service account.
  */
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
