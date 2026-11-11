@@ -4,8 +4,13 @@
  *
  *   TEST_GCS_BUCKET=<name of a bucket that already exists>
  *   GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json     (a real bucket)
- *   STORAGE_EMULATOR_HOST=http://127.0.0.1:4443                   (an emulator, in place of credentials)
+ *   TEST_GCS_EMULATOR_HOST=http://127.0.0.1:4443                  (an emulator, in place of credentials)
  *   TEST_GCS_PROJECT_ID=<project>                                (only if the client cannot find it)
+ *
+ * The emulator address has its own variable because the client treats STORAGE_EMULATOR_HOST
+ * as the whole API base URL (it does not add /storage/v1), which an emulator's host alone
+ * does not satisfy; the test passes it to the client as `apiEndpoint` instead. Leave
+ * STORAGE_EMULATOR_HOST unset when using it.
  *
  * The account needs permission to create, read, delete and list objects in the bucket (the
  * Storage Object Admin role). Every test works under a prefix of its own and deletes what it
@@ -50,7 +55,13 @@ if (bucketName === undefined || bucketName === '') {
   });
 } else {
   const projectId: string | undefined = process.env.TEST_GCS_PROJECT_ID;
-  const storage = new Storage(projectId === undefined ? {} : { projectId });
+  const emulatorHost: string | undefined = process.env.TEST_GCS_EMULATOR_HOST;
+  const storage = new Storage({
+    ...(projectId === undefined ? {} : { projectId }),
+    ...(emulatorHost === undefined || emulatorHost === ''
+      ? {}
+      : { apiEndpoint: emulatorHost }),
+  });
   const realBucket = storage.bucket(bucketName);
   // The real bucket is passed as it is: this also checks that it fits `GcsBucketLike`.
   const bucket: GcsBucketLike = realBucket;
