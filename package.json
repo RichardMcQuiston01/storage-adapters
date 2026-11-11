@@ -74,6 +74,16 @@
         "default": "./dist/clickhouse.cjs"
       }
     },
+    "./gcs": {
+      "import": {
+        "types": "./dist/gcs.d.ts",
+        "default": "./dist/gcs.js"
+      },
+      "require": {
+        "types": "./dist/gcs.d.cts",
+        "default": "./dist/gcs.cjs"
+      }
+    },
     "./google-drive": {
       "import": {
         "types": "./dist/google-drive.d.ts",
@@ -347,6 +357,9 @@
       "clickhouse": [
         "./dist/clickhouse.d.ts"
       ],
+      "gcs": [
+        "./dist/gcs.d.ts"
+      ],
       "google-drive": [
         "./dist/google-drive.d.ts"
       ],
@@ -466,6 +479,7 @@
     "@electric-sql/pglite": "^0.5.10",
     "@eslint/js": "^10.0.1",
     "@google-cloud/firestore": "^9.3.1",
+    "@google-cloud/storage": "^8.4.0",
     "@googleapis/drive": "^27.0.0",
     "@googleapis/sheets": "^18.1.2",
     "@nats-io/jetstream": "^3.4.0",
