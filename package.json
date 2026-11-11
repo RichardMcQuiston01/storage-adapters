@@ -1,6 +1,6 @@
 {
   "name": "@richardmcquiston01/storage-adapters",
-  "version": "0.24.1",
+  "version": "0.25.0",
   "description": "Tiny, runtime-neutral storage adapter layer for TypeScript: an async key-value contract with typed errors and revisions, composable wrappers (prefix, fallback, retry, cache, encoding), and a generic persistence helper with conflict handling. No I/O in the core.",
   "keywords": [
     "typescript",
@@ -72,6 +72,16 @@
       "require": {
         "types": "./dist/clickhouse.d.cts",
         "default": "./dist/clickhouse.cjs"
+      }
+    },
+    "./google-drive": {
+      "import": {
+        "types": "./dist/google-drive.d.ts",
+        "default": "./dist/google-drive.js"
+      },
+      "require": {
+        "types": "./dist/google-drive.d.cts",
+        "default": "./dist/google-drive.cjs"
       }
     },
     "./google-sheets": {
@@ -337,6 +347,9 @@
       "clickhouse": [
         "./dist/clickhouse.d.ts"
       ],
+      "google-drive": [
+        "./dist/google-drive.d.ts"
+      ],
       "google-sheets": [
         "./dist/google-sheets.d.ts"
       ],
@@ -453,6 +466,7 @@
     "@electric-sql/pglite": "^0.5.10",
     "@eslint/js": "^10.0.1",
     "@google-cloud/firestore": "^9.3.1",
+    "@googleapis/drive": "^27.0.0",
     "@googleapis/sheets": "^18.1.2",
     "@nats-io/jetstream": "^3.4.0",
     "@nats-io/kv": "^3.4.0",

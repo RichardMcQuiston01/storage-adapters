@@ -58,6 +58,8 @@
 - **0.24.1**: a clearer Google Sheets error when the Sheets API is not enabled for the
   credentials' project; the README records that `s3Adapter` passes against Cloudflare R2
   and the Google Sheets adapter passes against a real spreadsheet.
+- **0.25.0**: the `/google-drive` entry point with `googleDriveAdapter()` (best-effort
+  `ifRevision`; tested against a stand-in for the Drive API).
 - `dashboard-widgets-toolkit` 0.36.0 depends on this package and re-exports the
   wrappers, so its public API is unchanged.
 
@@ -85,15 +87,17 @@
 - Each adapter is added to `test/conformance.test.ts`, which runs the shared
   contract suite (`test/support/conformance.ts`) against it.
 
+## Later
+
+- The Google Drive adapter (`/google-drive`) has been tested against a stand-in for
+  the Drive API only: run `test/google-drive-live.test.ts` against
+  a real Drive folder (it needs credentials with a Drive scope; see the file) before relying on it.
+  I could not check Google's documentation for a conditional-update precondition, so `ifRevision`
+  is best-effort, and `sharedDrive: true` is untested.
+
 ## Potential
 
 Ideas, in no order. Nothing here is built or promised.
-
-- A Google Drive adapter (`/google-drive`), keeping entries as files in a Drive
-  folder through an injected Drive client. First check whether the Drive API
-  can make an update conditional on the file's current version or ETag;
-  without that, `ifRevision` would be best-effort. Needs a service account or
-  OAuth credentials to test live.
 
 - Google Cloud Storage (`/gcs`) and Azure Blob Storage (`/azure-blob`), the
   object-store siblings of `/s3`. Both have conditional writes (`ifGenerationMatch`
