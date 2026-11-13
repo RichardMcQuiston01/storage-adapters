@@ -60,6 +60,9 @@
   and the Google Sheets adapter passes against a real spreadsheet.
 - **0.25.0**: the `/google-drive` entry point with `googleDriveAdapter()` (best-effort
   `ifRevision`; tested against a stand-in for the Drive API).
+- **0.26.0**: the `/gcs` entry point with `gcsAdapter()` and `gcsObjectStore()` (atomic
+  `ifRevision` through the object generation; tested against stand-ins and, in CI, the
+  `fake-gcs-server` emulator).
 - `dashboard-widgets-toolkit` 0.36.0 depends on this package and re-exports the
   wrappers, so its public API is unchanged.
 
@@ -89,7 +92,7 @@
 
 ## Later
 
-- The Google Cloud Storage adapter (`/gcs`) is built and waiting for a release. It has been
+- The Google Cloud Storage adapter (`/gcs`) has been
   tested against in-memory stand-ins and, in CI, the `fake-gcs-server` emulator through the real
   client: run `test/gcs-live.test.ts` against a real bucket (needs credentials) before relying on
   it, in particular for the one-write-a-second-per-object limit, which no emulator reproduces.

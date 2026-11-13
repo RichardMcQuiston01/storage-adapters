@@ -1,5 +1,0 @@
----
-'@richardmcquiston01/storage-adapters': minor
----
-
-Add the `/gcs` entry point with `gcsAdapter()` and `gcsObjectStore()`, an adapter that keeps each key as an object in a Google Cloud Storage bucket. It imports no SDK: `gcsObjectStore()` wraps a bucket from `@google-cloud/storage`. The object's generation is the revision, and `set` with `ifRevision` is a conditional write (`ifGenerationMatch`), so two writers holding the same revision cannot both win, across processes and machines; a key with nothing stored is created with `ifGenerationMatch: 0`. A read asks for the generation first and downloads exactly that generation, so the text and revision always belong together. Errors explain a missing bucket, missing permissions, and GCS's limit of about one write a second to a single object name. `subscribe` reports changes made through the same adapter. Tested against in-memory stand-ins and, in CI, against the `fake-gcs-server` emulator through the real client; a test against a real bucket is included but skipped unless `TEST_GCS_BUCKET` is set.
