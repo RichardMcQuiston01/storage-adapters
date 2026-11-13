@@ -12,6 +12,7 @@ export default defineConfig({
     mysql: 'src/mysql/index.ts',
     s3: 'src/s3/index.ts',
     clickhouse: 'src/clickhouse/index.ts',
+    gcs: 'src/gcs/index.ts',
     'google-drive': 'src/google-drive/index.ts',
     'google-sheets': 'src/google-sheets/index.ts',
     rabbitmq: 'src/rabbitmq/index.ts',
