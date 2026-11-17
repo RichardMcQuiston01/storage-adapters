@@ -343,6 +343,8 @@ function oldest(files: readonly DriveFileLike[]): DriveFileLike | undefined {
  * up to 255 characters, since it is a file name. `subscribe` reports this adapter's own
  * writes and, with `pollIntervalMs`, changes made by others. Nothing throws: every
  * failure, a network error included, is a `StoreResult`.
+ *
+ * @experimental May change in a minor release until it has run in CI against the real service. Only an opt-in live test uses it. See docs/export-audit.md.
  */
 export function googleDriveAdapter(
   options: GoogleDriveAdapterOptions
