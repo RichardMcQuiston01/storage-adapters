@@ -1,4 +1,4 @@
-export { prefixUpperBound, rethinkDbAdapter } from './rethinkdb.js';
+export { rethinkDbAdapter } from './rethinkdb.js';
 export type {
   ReqlBuilderLike,
   ReqlCursorLike,

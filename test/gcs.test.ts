@@ -9,10 +9,10 @@ import { describe, it } from 'node:test';
 import {
   gcsAdapter,
   gcsObjectStore,
-  MAX_VALUE_BYTES,
   type GcsAdapterOptions,
   type GcsStoreLike,
 } from '../src/gcs/index.js';
+import { MAX_VALUE_BYTES } from '../src/gcs/gcs.js';
 import type {
   StorageAdapter,
   StoredValue,

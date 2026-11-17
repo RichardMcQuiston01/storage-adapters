@@ -7,10 +7,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
-  prefixUpperBound,
   rethinkDbAdapter,
   type RethinkDbAdapterOptions,
 } from '../src/rethinkdb/index.js';
+import { prefixUpperBound } from '../src/rethinkdb/rethinkdb.js';
 import type {
   StorageAdapter,
   StoredValue,

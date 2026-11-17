@@ -1,8 +1,4 @@
-export {
-  arangoDbAdapter,
-  decodeArangoKey,
-  encodeArangoKey,
-} from './arangodb.js';
+export { arangoDbAdapter } from './arangodb.js';
 export type {
   ArangoDbAdapterOptions,
   ArangoDbFetch,
