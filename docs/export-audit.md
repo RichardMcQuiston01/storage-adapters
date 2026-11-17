@@ -57,6 +57,45 @@ These are exported but have no README mention. Each is used only in tests.
 - **Option and result types** (`...Options`, `Loaded`, `Saved`, `Persistence`, `ConflictPolicy`, and the like): Stable alongside the function that takes them.
 - **Structural driver types** (`PostgresClientLike`, `SqliteDatabaseLike`, `RedisClientLike`, `FetchLike`, `IdbFactoryLike`, `FileSystemLike` and the other `...Like` types): these are the library's contract with each driver. Keep them exported. They are Stable for Stable adapters, with one rule written into the policy: adding a required member to a `...Like` type is a breaking change. The real driver types must keep type-checking against them without casts.
 
+## Update: the 13 entry points added since 0.15 (2026-11-17)
+
+Versions 0.16.0 to 0.26.0 added 13 entry points, which takes the package from 18 to 31. They are judged by the same rule: the shared conformance suite runs against the real server in CI. **Ten meet it and are Stable. Three do not and are Experimental.** This is a proposal until it is approved.
+
+| Entry point       | Conformance runs against                                                               | Proposed                                                                                                                                                                   |
+| ----------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `./clickhouse`    | A ClickHouse 25.8 server (`clickhouse` job)                                            | Stable                                                                                                                                                                     |
+| `./rabbitmq`      | A RabbitMQ 4.0.5 broker (`rabbitmq` job)                                               | Stable                                                                                                                                                                     |
+| `./influxdb`      | An InfluxDB 2.7 server (`influxdb` job)                                                | Stable                                                                                                                                                                     |
+| `./rethinkdb`     | A RethinkDB 2.4.4 server (`rethinkdb` job)                                             | Stable                                                                                                                                                                     |
+| `./memcached`     | A Memcached 1.6.24 server (`memcached` job)                                            | Stable                                                                                                                                                                     |
+| `./nats`          | A NATS 2.11.8 server with JetStream (`nats` job)                                       | Stable                                                                                                                                                                     |
+| `./neo4j`         | A Neo4j 5.26.0 server (`neo4j` job)                                                    | Stable                                                                                                                                                                     |
+| `./arangodb`      | An ArangoDB 3.12.9 server (`arangodb` job)                                             | Stable                                                                                                                                                                     |
+| `./cassandra`     | A Cassandra 5.0.5 node (`cassandra` job)                                               | Stable                                                                                                                                                                     |
+| `./couchdb`       | A CouchDB 3.5.0 server (`couchdb` job)                                                 | Stable                                                                                                                                                                     |
+| `./gcs`           | `fake-gcs-server`, an emulator, in CI. A real bucket only by hand (`gcs-live.test.ts`) | Experimental, like the Firestore emulator entry points. Stable once a run against a real bucket is recorded and one `@google-cloud/storage` major version has gone through |
+| `./google-drive`  | A fake in CI. A real Drive folder only by hand                                         | Experimental                                                                                                                                                               |
+| `./google-sheets` | A fake in CI. A real spreadsheet only by hand                                          | Experimental                                                                                                                                                               |
+
+**Why the Google entry points stay Experimental.** Drive and Sheets cannot be run in CI without credentials and have rate limits (Sheets allows about 60 requests a minute per user), so their live tests are opt-in and need a long timeout. They also depend on SDKs that change (`@googleapis/drive`, `@googleapis/sheets`).
+
+**Value exports to question.** These are exported from the new entry points but are implementation details of key encoding or limits. The README does not mention them, and only tests import them. Proposed **Internal**, the same call as the five helpers removed earlier. Removing them is breaking, which is fine before 1.0. **Decision needed.**
+
+| Entry point   | Exports                                                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `./influxdb`  | `encodeInfluxKey`, `decodeInfluxKey`, `escapeInfluxValue`, `unescapeInfluxValue`                                         |
+| `./nats`      | `encodeNatsKey`, `decodeNatsKey`                                                                                         |
+| `./arangodb`  | `encodeArangoKey`, `decodeArangoKey`                                                                                     |
+| `./rethinkdb` | `prefixUpperBound`                                                                                                       |
+| `./gcs`       | `MAX_VALUE_BYTES` (also used by other entry points through `src/`, so keep it in the source and drop only the re-export) |
+| `./rabbitmq`  | The `RabbitMqAdapter` class. `rabbitMqAdapter()` is the documented entry                                                 |
+
+`memcachedFromMemcacheClient` is documented in the README and stays public with `./memcached`.
+
+**What the status changes.** The README Stability section lists the new entry points, and `gcsAdapter`, `gcsObjectStore`, `googleDriveAdapter` and `googleSheetsAdapter` carry `@experimental`. The structural driver types (`...Like`) of the Experimental entry points are not covered by the rules in the policy until the entry point is Stable.
+
+**Still unproven.** The ten Stable entry points have run in CI against one server version each. None has been used by anyone outside this repository. That was true of the earlier Stable set, so the rule above rests on tests, not on soak time.
+
 ## Findings
 
 1. **The Stable list is broad.** Fourteen of the seventeen entry points meet the rule, which is more than the "core contract and a short list" I expected. The evidence in this repo is strong. The risk is that none of it has been used outside CI.
