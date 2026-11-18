@@ -79,7 +79,7 @@ Versions 0.16.0 to 0.26.0 added 13 entry points, which takes the package from 18
 
 **Why the Google entry points stay Experimental.** Drive and Sheets cannot be run in CI without credentials and have rate limits (Sheets allows about 60 requests a minute per user), so their live tests are opt-in and need a long timeout. They also depend on SDKs that change (`@googleapis/drive`, `@googleapis/sheets`).
 
-**Value exports to question.** These are exported from the new entry points but are implementation details of key encoding or limits. The README does not mention them, and only tests import them. Proposed **Internal**, the same call as the five helpers removed earlier. Removing them is breaking, which is fine before 1.0. **Decision needed.**
+**Value exports to question.** These were exported from the new entry points but are implementation details of key encoding or limits. The README does not mention them, and only tests import them. **Decided (2026-11-17): Internal.** They are no longer exported, the same call as the five helpers removed earlier. The tests import them from the adapter's own module. `RabbitMqAdapter` is a type only (the return type of `rabbitMqAdapter()`), so it stays public.
 
 | Entry point   | Exports                                                                                                                  |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------ |

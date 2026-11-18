@@ -6,11 +6,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  decodeNatsKey,
-  encodeNatsKey,
-  natsKvAdapter,
-} from '../src/nats/index.js';
+import { natsKvAdapter } from '../src/nats/index.js';
+import { decodeNatsKey, encodeNatsKey } from '../src/nats/nats.js';
 import type { StoredValue, StoreResult } from '../src/storage.js';
 import { runConformance } from './support/conformance.js';
 import { FakeJetStreamError, FakeNatsKv } from './support/fake-nats.js';
