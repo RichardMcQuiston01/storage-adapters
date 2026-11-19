@@ -63,6 +63,9 @@
 - **0.26.0**: the `/gcs` entry point with `gcsAdapter()` and `gcsObjectStore()` (atomic
   `ifRevision` through the object generation; tested against stand-ins and, in CI, the
   `fake-gcs-server` emulator).
+- **1.0.0-rc.1**: the first release candidate, published under the `next` npm tag. The
+  export audit is settled: 24 entry points are Stable and seven are Experimental
+  (`@experimental`), and the key-encoding helpers are no longer exported.
 - `dashboard-widgets-toolkit` 0.36.0 depends on this package and re-exports the
   wrappers, so its public API is unchanged.
 
