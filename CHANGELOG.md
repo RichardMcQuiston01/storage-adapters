@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## 1.0.0-rc.1
+
+First release candidate for 1.0.0. It is published under the `next` npm tag, so `npm install` still gets 0.26.0 until 1.0.0. From 1.0.0 the package follows the rules in `docs/versioning-policy.md`; the release candidate is not covered by them and can change before 1.0.0. Entry points tagged `@experimental` (`/firebase`, `/firebase/realtime`, `/supabase`, `/react`, `/gcs`, `/google-drive`, `/google-sheets`, Postgres's `listener` and MySQL's `pollIntervalMs`) stay outside the semver promise.
+
+The changes below are the ones since 0.26.0 (the changeset heading `Minor Changes` is the bump they would have made in 0.x).
+
+### Minor Changes
+
+- db488c1: Stop exporting helpers that were implementation details of key encoding and limits: `encodeInfluxKey`, `decodeInfluxKey`, `escapeInfluxValue` and `unescapeInfluxValue` from `/influxdb`, `encodeNatsKey` and `decodeNatsKey` from `/nats`, `encodeArangoKey` and `decodeArangoKey` from `/arangodb`, `prefixUpperBound` from `/rethinkdb`, and `MAX_VALUE_BYTES` from `/gcs`. None is documented. **Breaking** for code that imported one of them. The adapters behave as before.
+
+### Patch Changes
+
+- f9570ab: Mark `/gcs`, `/google-drive` and `/google-sheets` as Experimental (tagged `@experimental`, listed in the README Stability section). Their tests in CI use an emulator or a fake, not the real service, so they may change in a minor release until a real run is recorded. No behavior changes. The README now also lists the ten server-backed entry points added since 0.15 as Stable.
+
 ## 0.26.0
 
 ### Minor Changes

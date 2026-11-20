@@ -1,4 +1,4 @@
-export { decodeNatsKey, encodeNatsKey, natsKvAdapter } from './nats.js';
+export { natsKvAdapter } from './nats.js';
 export type {
   NatsKvAdapterOptions,
   NatsKvEntryLike,

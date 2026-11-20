@@ -1611,9 +1611,12 @@ either **Stable** or **Experimental**:
 
 - **Stable:** the core contract, the wrappers and `createPersistence`; `/browser`,
   `/indexeddb`, `/sqlite`, `/file`, `/json-file`, `/yaml-file`, `/ini-file`,
-  `/postgres`, `/mysql`, `/redis`, `/s3` and `/rest`. A breaking change needs a new
+  `/postgres`, `/mysql`, `/redis`, `/s3`, `/rest`, `/clickhouse`, `/rabbitmq`,
+  `/influxdb`, `/rethinkdb`, `/memcached`, `/nats`, `/neo4j`, `/arangodb`, `/cassandra`
+  and `/couchdb`. A breaking change needs a new
   major version.
 - **Experimental:** `/firebase`, `/firebase/realtime`, `/supabase`, `/react`,
+  `/gcs`, `/google-drive`, `/google-sheets`,
   Postgres's `listener` option and MySQL's `pollIntervalMs` option. They are tagged `@experimental` in the type
   definitions and may change in a minor release, with a note in the changelog. They
   become Stable once they have run against the real service (for `/react`, in a real

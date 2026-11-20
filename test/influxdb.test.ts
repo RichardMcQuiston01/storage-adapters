@@ -7,13 +7,15 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  influxDbAdapter,
+  type InfluxDbAdapterOptions,
+} from '../src/influxdb/index.js';
+import {
   decodeInfluxKey,
   encodeInfluxKey,
   escapeInfluxValue,
-  influxDbAdapter,
   unescapeInfluxValue,
-  type InfluxDbAdapterOptions,
-} from '../src/influxdb/index.js';
+} from '../src/influxdb/influxdb.js';
 import type {
   StorageAdapter,
   StoredValue,

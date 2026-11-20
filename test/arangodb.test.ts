@@ -8,10 +8,9 @@ import { describe, it } from 'node:test';
 
 import {
   arangoDbAdapter,
-  decodeArangoKey,
-  encodeArangoKey,
   type ArangoDbAdapterOptions,
 } from '../src/arangodb/index.js';
+import { decodeArangoKey, encodeArangoKey } from '../src/arangodb/arangodb.js';
 import type {
   StorageAdapter,
   StoredValue,

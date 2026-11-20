@@ -160,6 +160,8 @@ function keyProblem(objectKey: string): string | undefined {
  * made through the same adapter. GCS allows about one write a second to a single object
  * name, so a key written in a tight loop can be answered with `unavailable` (HTTP 429).
  * Nothing throws: every failure is a `StoreResult`.
+ *
+ * @experimental May change in a minor release until it has been run against a real bucket. CI runs it against an emulator only. See docs/export-audit.md.
  */
 export function gcsAdapter(options: GcsAdapterOptions): StorageAdapter {
   const { store } = options;
@@ -519,6 +521,8 @@ const MAX_READ_ATTEMPTS = 3;
  * revision always belong together even if the object is replaced in between (the read
  * starts again). A write sends one simple upload and reads the generation from the
  * answer. Nothing here imports the client: pass in its bucket.
+ *
+ * @experimental May change in a minor release until it has been run against a real bucket. CI runs it against an emulator only. See docs/export-audit.md.
  */
 export function gcsObjectStore(options: GcsObjectStoreOptions): GcsStoreLike {
   const { bucket } = options;
